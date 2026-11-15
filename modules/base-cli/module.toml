@@ -3,8 +3,9 @@ category    = "base"
 
 [packages]
 pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7zip", "micro",
-          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python"]
+          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh"]
 aur    = ["yay"]
 
 [units]
 system = ["fstrim.timer"]
+user   = ["ssh-agent.service"]
