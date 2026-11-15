@@ -25,6 +25,7 @@ zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
 # Aliases
 alias ls='ls --color=auto' ll='ls -lh --color=auto' la='ls -lAh --color=auto'
 alias grep='grep --color=auto'
+alias zed=zeditor
 
 # Tools (each init is cheap; uv's completion is cached and regenerated when uv changes)
 source <(fzf --zsh)

@@ -2,5 +2,5 @@ description = "Desktop applications"
 category    = "apps"
 
 [packages]
-pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager", "ark"]
+pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager", "ark", "mpv"]
 aur    = ["pear-desktop"]

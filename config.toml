@@ -1,3 +1,6 @@
 # arcus configuration (shared across machines). Machine-specific values live in the
 # machine module written by `arcus machine`, never here: this repository is public.
 aur_helper = "yay"
+
+# Private modules (personal and machine-specific config).
+module_dirs = ["~/dotfiles-private/modules"]

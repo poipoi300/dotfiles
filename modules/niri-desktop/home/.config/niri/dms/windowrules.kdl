@@ -1,0 +1,27 @@
+// Window rules for games and apps
+// window-rule {
+//     // Default: Match common Steam games
+//     match app-id=r#"^steam_app_\d+$"#
+//     
+//     // Open in true fullscreen mode
+//     open-fullscreen true
+//     
+//     // Disable borders and focus rings for a clean experience
+//     focus-ring { off; }
+//     border { off; }
+//     draw-border-with-background false
+// }
+
+// Exception for "Lunar Eclipse"
+window-rule {
+    match app-id="steam_app_2953480"
+    open-fullscreen false
+    open-floating true
+}
+
+window-rule {
+    match app-id="org.gnome.Games"
+    open-fullscreen true
+    focus-ring { off; }
+    border { off; }
+}
