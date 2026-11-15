@@ -14,8 +14,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 3
-        radius: 12
-        color: "#26ffffff"
+        radius: Theme.radius
+        color: tap.pressed ? Theme.pressed : Theme.hover
         opacity: hover.hovered ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 90 } }
     }
@@ -37,10 +37,10 @@ Item {
         width: cell.width - 12
         height: 32
         text: cell.label
-        color: Items.style.text
-        opacity: cell.dim ? 0.5 : 0.92
+        color: hover.hovered ? Theme.accent : Theme.text
+        opacity: cell.dim ? 0.5 : 0.95
         font.pixelSize: 12
-        font.family: Items.style.font
+        font.family: Theme.font
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignTop
         wrapMode: Text.Wrap
@@ -49,5 +49,5 @@ Item {
     }
 
     HoverHandler { id: hover }
-    TapHandler { onTapped: cell.tapped() }
+    TapHandler { id: tap; onTapped: cell.tapped() }
 }

@@ -13,11 +13,14 @@ Item {
     property real slotX: 0
     property real iconSize: 30
     property real iconBottom: 0
+    property bool shown: true          // dock is on screen (urgent hopping only runs then)
+    property bool folderShown: false   // this folder's panel is open
 
     readonly property var info: Items.info(node)
     readonly property bool isFolder: node.type === "group" || node.type === "dir"
     readonly property bool running: !isFolder && Windows.matching(info.keys).length > 0
     readonly property bool urgent: !isFolder && Windows.urgent(info.keys)
+    readonly property bool focused: running && Windows.isActive(info.keys)
     readonly property bool present: info.present
     readonly property bool hasIcon: node.icon !== undefined && node.icon !== ""
     property var dirPreview: []
@@ -48,16 +51,18 @@ Item {
         }
     }
 
-    // running indicator
+    // running indicator: a dot, a short bar for the focused app or the open folder
     Rectangle {
-        width: 4
+        readonly property bool wide: cell.focused || cell.folderShown
+        width: wide ? 12 : 4
         height: 4
         radius: 2
-        x: cell.iconSize / 2 - 2
+        x: (cell.iconSize - width) / 2
         y: cell.iconSize + 4
-        color: "white"
-        opacity: cell.running ? 0.95 : 0
+        color: Theme.accent
+        opacity: cell.running || cell.folderShown ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
+        Behavior on width { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
     }
 
     // launch bounce (once) and urgent attention (repeats while urgent)
@@ -67,7 +72,7 @@ Item {
         NumberAnimation { target: body; property: "y"; to: 0; duration: 380; easing.type: Easing.OutBounce }
     }
     SequentialAnimation {
-        running: cell.urgent
+        running: cell.urgent && cell.shown
         loops: Animation.Infinite
         onRunningChanged: if (!running) body.y = 0
         NumberAnimation { target: body; property: "y"; to: -26; duration: 200; easing.type: Easing.OutQuad }
@@ -82,9 +87,9 @@ Item {
         onTapped: cell.tapped()
     }
 
-    // directory folders: shallow listing, used for existence check and the mini-grid preview
+    // directory folders without an icon: shallow listing for the mini-grid preview only
     Loader {
-        active: cell.node.type === "dir" && cell.info.present
+        active: cell.node.type === "dir" && !cell.hasIcon && cell.info.present
         sourceComponent: FolderListModel {
             id: flm
             folder: "file://" + Items.expand(cell.node.path)

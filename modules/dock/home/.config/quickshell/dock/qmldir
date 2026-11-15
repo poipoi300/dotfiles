@@ -1,5 +1,6 @@
 singleton Items Items.qml
 singleton Windows Windows.qml
+singleton Theme Theme.qml
 Dock 1.0 Dock.qml
 DockItem 1.0 DockItem.qml
 DockIcon 1.0 DockIcon.qml

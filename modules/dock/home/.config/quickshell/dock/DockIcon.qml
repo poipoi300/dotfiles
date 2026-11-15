@@ -24,7 +24,9 @@ Item {
         anchors.fill: parent
         visible: root.source !== "" && status !== Image.Error
         source: root.source
-        sourceSize: Qt.size(root.thumb ? 192 : 128, root.thumb ? 192 : 128)
+        // 2x the reference size: stays sharp at the 128 px peak on scaled outputs, and mipmaps
+        // keep the small (scaled-down) sizes clean
+        sourceSize: Qt.size(256, 256)
         fillMode: root.thumb ? Image.PreserveAspectCrop : Image.PreserveAspectFit
         asynchronous: true
         mipmap: true
@@ -35,11 +37,11 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 6
-        radius: 26
-        visible: root.source === "" && root.preview.length > 0 || (root.source !== "" && img.status === Image.Error && root.preview.length > 0)
-        color: "#38ffffff"
-        border.width: 3
-        border.color: "#40ffffff"
+        radius: 30
+        visible: root.preview.length > 0 && (root.source === "" || img.status === Image.Error)
+        color: Theme.tile
+        border.width: 2
+        border.color: Theme.border
         Grid {
             anchors.centerIn: parent
             columns: 2
@@ -54,9 +56,10 @@ Item {
                     Image {
                         anchors.fill: parent
                         source: parent.modelData.icon
-                        sourceSize: Qt.size(64, 64)
+                        sourceSize: Qt.size(96, 96)
                         asynchronous: true
                         mipmap: true
+                        smooth: true
                     }
                 }
             }
@@ -67,15 +70,16 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 8
-        radius: 28
-        color: "#3a3a52"
+        radius: 30
+        color: Theme.tile
         visible: (root.source === "" || img.status === Image.Error) && root.preview.length === 0
         Text {
             anchors.centerIn: parent
             text: root.label.length ? root.label[0].toUpperCase() : "?"
-            color: "#cdd6f4"
+            color: Theme.accent
             font.pixelSize: 64
             font.bold: true
+            font.family: Theme.font
         }
     }
 }

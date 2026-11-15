@@ -38,6 +38,12 @@ Singleton {
         return out;
     }
 
+    // the focused window belongs to this app
+    function isActive(keys) {
+        const id = active ? (active.appId || "").toLowerCase() : "";
+        return id !== "" && !!keys && keys.indexOf(id) >= 0;
+    }
+
     function urgent(keys) {
         rev;
         for (const k of keys) if (urgentApps[k]) return true;
@@ -46,6 +52,15 @@ Singleton {
 
     // Focus a running window of this app (cycling when it has several). Returns false if none.
     function focus(keys) {
+        // A window of this app asking for attention wins. Foreign-toplevel handles carry no
+        // niri id, so focus it through niri by id.
+        for (const id in wins) {
+            const w = wins[id];
+            if (w.urgent && keys.indexOf(w.app) >= 0) {
+                Quickshell.execDetached(["niri", "msg", "action", "focus-window", "--id", String(id)]);
+                return true;
+            }
+        }
         const list = matching(keys);
         if (!list.length) return false;
         let target = list[0];
@@ -53,7 +68,6 @@ Singleton {
             const i = list.findIndex(t => t.activated);
             if (i >= 0) target = list[(i + 1) % list.length];
         }
-        // prefer an urgent window if there is one
         target.activate();
         return true;
     }
@@ -69,8 +83,13 @@ Singleton {
     }
     function put(w) { wins[w.id] = { app: (w.app_id || "").toLowerCase(), urgent: !!w.is_urgent }; }
 
+    // Only these events matter. niri also streams WindowLayoutsChanged (every resize), focus,
+    // workspace and overview events; skip them before parsing.
+    readonly property var wanted: ['{"WindowsChanged"', '{"WindowOpenedOrChanged"', '{"WindowClosed"', '{"WindowUrgencyChanged"']
     function onEvent(line) {
-        if (line.indexOf('"Window') < 0) return;
+        let hit = false;
+        for (const p of wanted) if (line.startsWith(p)) { hit = true; break; }
+        if (!hit) return;
         let ev;
         try { ev = JSON.parse(line); } catch (e) { return; }
         if (ev.WindowsChanged) {
@@ -81,7 +100,8 @@ Singleton {
             const w = ev.WindowOpenedOrChanged.window;
             const before = wins[w.id];
             put(w);
-            if (!before || before.urgent !== wins[w.id].urgent) recompute();
+            const now = wins[w.id];
+            if (!before || before.urgent !== now.urgent || (now.urgent && before.app !== now.app)) recompute();
         } else if (ev.WindowClosed) {
             if (wins[ev.WindowClosed.id]) { delete wins[ev.WindowClosed.id]; recompute(); }
         } else if (ev.WindowUrgencyChanged) {

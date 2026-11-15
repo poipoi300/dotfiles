@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Qt.labs.folderlistmodel
 
 // The expanded folder: a grid above the dock that grows out of the folder icon. Group
@@ -13,7 +14,10 @@ Item {
     property var stack: []             // [{type, name, items|path}]
     readonly property var cur: stack.length ? stack[stack.length - 1] : null
     readonly property bool hovered: hover.hovered
-    property int count: 0
+    // number of entries of the shown level, straight from whichever view is active (an
+    // imperative reset missed levels with the same count as the previous one)
+    readonly property int count: groupView.item ? groupView.item.count
+                               : dirLoader.item ? dirLoader.item.count : 0
 
     signal closeRequested()
     signal runNode(var node)
@@ -28,14 +32,12 @@ Item {
     readonly property int shownRows: Math.min(rows, 4)
 
     function openNode(node) {
-        count = 0;
         stack = [node];
         forceActiveFocus();
     }
-    function push(node) { count = 0; stack = stack.concat([node]); fade.restart(); }
+    function push(node) { stack = stack.concat([node]); fade.restart(); }
     function popTo(depth) {   // keep `depth` levels
         if (depth < 1 || depth >= stack.length) return;
-        count = 0;
         stack = stack.slice(0, depth);
         fade.restart();
     }
@@ -52,7 +54,7 @@ Item {
     }
     visible: g > 0.01
     opacity: Math.min(1, g * 1.6)
-    onVisibleChanged: if (!visible) { stack = []; count = 0; }
+    onVisibleChanged: if (!visible) stack = []
 
     width: cols * cellW + 2 * pad
     height: headerH + shownRows * cellH + pad
@@ -76,12 +78,21 @@ Item {
         if (ev.key === Qt.Key_Backspace) { panel.back(); ev.accepted = true; }
     }
 
+    RectangularShadow {
+        anchors.fill: bg
+        offset.y: 6
+        blur: 28
+        spread: -4
+        radius: bg.radius
+        color: Theme.shadow
+    }
     Rectangle {
+        id: bg
         anchors.fill: parent
-        radius: 18
-        color: Items.style.panelBackground
+        radius: Theme.radius * 1.5
+        color: Theme.panel
         border.width: 1
-        border.color: Items.style.border
+        border.color: Theme.border
     }
 
     // swallow stray taps on the panel background
@@ -100,14 +111,16 @@ Item {
             height: 28
             radius: 14
             anchors.verticalCenter: parent.verticalCenter
-            color: backTap.pressed || backHover.hovered ? "#33ffffff" : "#1affffff"
+            color: backTap.pressed ? Theme.pressed : backHover.hovered ? Theme.hover : Theme.tile
+            Behavior on color { ColorAnimation { duration: 90 } }
             Text {
                 anchors.centerIn: parent
+                anchors.verticalCenterOffset: -1
                 text: "‹"
-                color: Items.style.text
+                color: backHover.hovered ? Theme.accent : Theme.text
                 font.pixelSize: 20
                 font.bold: true
-                font.family: Items.style.font
+                font.family: Theme.font
             }
             HoverHandler { id: backHover }
             TapHandler { id: backTap; onTapped: panel.back() }
@@ -123,19 +136,20 @@ Item {
                 Text {
                     visible: index > 0
                     text: "›"
-                    color: "#99ffffff"
+                    color: Theme.textDim
                     font.pixelSize: 14
-                    font.family: Items.style.font
+                    font.family: Theme.font
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                     text: modelData.name
-                    color: Items.style.text
-                    opacity: index === panel.stack.length - 1 ? 1 : 0.6
+                    color: crumbHover.hovered && index < panel.stack.length - 1 ? Theme.accent : Theme.text
+                    opacity: index === panel.stack.length - 1 ? 1 : 0.65
                     font.pixelSize: 14
-                    font.bold: true
-                    font.family: Items.style.font
+                    font.weight: Font.DemiBold
+                    font.family: Theme.font
                     anchors.verticalCenter: parent.verticalCenter
+                    HoverHandler { id: crumbHover }
                     TapHandler { enabled: index < panel.stack.length - 1; onTapped: panel.popTo(index + 1) }
                 }
             }
@@ -157,9 +171,9 @@ Item {
             anchors.centerIn: parent
             visible: panel.count === 0 && panel.cur !== null
             text: panel.cur && panel.cur.type === "dir" && !Items.dirExists(panel.cur) && !panel.cur.sub ? "Folder not available" : "Empty"
-            color: "#99ffffff"
+            color: Theme.textDim
             font.pixelSize: 13
-            font.family: Items.style.font
+            font.family: Theme.font
         }
 
         // group folder
@@ -171,9 +185,7 @@ Item {
                 cellWidth: panel.cellW
                 cellHeight: panel.cellH
                 boundsBehavior: Flickable.StopAtBounds
-                model: panel.cur.items || []
-                onCountChanged: panel.count = count
-                Component.onCompleted: panel.count = count
+                model: panel.cur && panel.cur.items ? panel.cur.items : []
                 delegate: FolderCell {
                     required property var modelData
                     readonly property var info: Items.info(modelData)
@@ -205,14 +217,13 @@ Item {
                 cacheBuffer: panel.cellH * 2
                 model: FolderListModel {
                     id: flm
-                    folder: "file://" + Items.expand(panel.cur.path)
+                    folder: panel.cur && panel.cur.path ? "file://" + Items.expand(panel.cur.path) : ""
                     showDirsFirst: true
                     showDotAndDotDot: false
                     showHidden: false
                     sortField: FolderListModel.Name
-                    onCountChanged: panel.count = count
+                    caseSensitive: false
                 }
-                Component.onCompleted: panel.count = flm.count
                 delegate: FolderCell {
                     required property string fileName
                     required property string filePath

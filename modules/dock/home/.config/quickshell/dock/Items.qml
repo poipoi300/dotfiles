@@ -13,10 +13,10 @@ Singleton {
     readonly property string dataDir: (Quickshell.env("DOCK_DATA_DIR") || (home + "/.local/share/dock")) + "/"
 
     readonly property var defaults: ({
-        style: {
-            font: "sans-serif", radius: 16, background: "#d9181825", border: "#26cdd6f4",
-            text: "#ffffff", labelBackground: "#ee11111b", panelBackground: "#f71e1e2e", accent: "#cba6f7"
-        },
+        // Colours, font and radius come from the DankMaterialShell theme (Theme.qml). Any of
+        // font, radius, background, border, text, labelBackground, panelBackground, accent set
+        // here in config.json overrides it.
+        style: {},
         icon: { size: 30, peak: 128, spacing: 8, waveSlots: 3 },
         behavior: {
             output: "", hideOnFullscreen: true, hideOnMaximized: true,
@@ -75,7 +75,9 @@ Singleton {
     }
     function checkCommands(list) {
         const cmds = collectCommands(list, []);
-        if (!cmds.length) return;
+        if (!cmds.length) { missingCmds = {}; rev++; return; }
+        // a config reload while a check runs: run again with the new list once it exits
+        if (cmdCheck.running) { cmdCheck.again = true; return; }
         cmdCheck.command = ["sh", "-c", 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 || echo "$c"; done', "sh"].concat(cmds);
         cmdCheck.found = {};
         cmdCheck.running = true;
@@ -83,8 +85,13 @@ Singleton {
     Process {
         id: cmdCheck
         property var found: ({})
+        property bool again: false
         stdout: SplitParser { onRead: line => cmdCheck.found[line] = true }
-        onExited: { root.missingCmds = cmdCheck.found; root.rev++; }
+        onExited: {
+            root.missingCmds = cmdCheck.found;
+            root.rev++;
+            if (again) { again = false; root.checkCommands(root.items); }
+        }
     }
 
     // ---- which directory folders exist (on config load and each time the dock is revealed,
@@ -98,9 +105,9 @@ Singleton {
         return out;
     }
     function checkDirs() {
-        if (dirCheck.running) return;
+        if (dirCheck.running) { dirCheck.again = true; return; }
         const paths = collectDirs(items, []);
-        if (!paths.length) return;
+        if (!paths.length) { dirs = {}; return; }
         dirCheck.command = ["sh", "-c", 'for p in "$@"; do [ -d "$p" ] && echo "$p"; done', "sh"].concat(paths);
         dirCheck.found = {};
         dirCheck.running = true;
@@ -109,8 +116,12 @@ Singleton {
     Process {
         id: dirCheck
         property var found: ({})
+        property bool again: false
         stdout: SplitParser { onRead: line => dirCheck.found[line] = true }
-        onExited: root.dirs = dirCheck.found
+        onExited: {
+            root.dirs = dirCheck.found;
+            if (again) { again = false; root.checkDirs(); }
+        }
     }
 
     // DesktopEntries fills in asynchronously after startup

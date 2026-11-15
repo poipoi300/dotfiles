@@ -1,14 +1,5 @@
 {
-  "style": {
-    "font": "Inter Variable",
-    "radius": 16,
-    "background": "#d9181825",
-    "border": "#26cdd6f4",
-    "text": "#ffffff",
-    "labelBackground": "#ee11111b",
-    "panelBackground": "#f71e1e2e",
-    "accent": "#cba6f7"
-  },
+  "style": {},
   "icon": { "size": 30, "peak": 128, "spacing": 8, "waveSlots": 3 },
   "behavior": {
     "output": "",
