@@ -2,4 +2,6 @@ description = "Gaming: Steam, MangoHud and GOverlay"
 category    = "games"
 
 [packages]
-pacman = ["steam", "mangohud", "goverlay"]
+local  = ["cosmos-cheathappens"]   # closed source, runs as root via sudo (user accepted)
+pacman = ["steam", "mangohud", "goverlay", "lutris", "prismlauncher"]
+aur    = ["heroic-games-launcher-bin", "r2modman-bin", "osu-lazer-bin", "sunshine"]

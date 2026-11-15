@@ -1,0 +1,2 @@
+# Prefer uv-managed Pythons (uv python install 3.15); system python3 stays for packages.
+python-preference = "managed"

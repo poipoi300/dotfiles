@@ -1,0 +1,16 @@
+#!/bin/sh
+# Start linux-wallpaperengine on $WPE_OUTPUT, or on niri's first enabled output when unset,
+# so a renamed connector (DP-6 -> DP-3 after a driver update) doesn't break the wallpaper.
+set -eu
+out=${WPE_OUTPUT:-}
+if [ -z "$out" ]; then
+    out=$(niri msg --json outputs | python3 -I -c '
+import json, sys
+outs = json.load(sys.stdin)
+names = [n for n, o in outs.items() if o.get("current_mode") is not None]
+print(sorted(names)[0] if names else "")')
+fi
+[ -n "$out" ] || { echo "wallpaperengine-start: no enabled output" >&2; exit 1; }
+exec /usr/bin/linux-wallpaperengine --silent --fps "${WPE_FPS:-30}" \
+    --fullscreen-pause-only-active --scaling fill \
+    --screen-root "$out" --bg "$WPE_BG"

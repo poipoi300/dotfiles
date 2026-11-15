@@ -1,0 +1,24 @@
+# Official release binary from github.com/router-for-me/CLIProxyAPI (linked from the project's own README).
+# Verified: sha256 below matches the release's checksums.txt (and GitHub's asset digest).
+pkgname=cli-proxy-api
+pkgver=8.0.73
+pkgrel=1
+pkgdesc="Proxy exposing CLI AI subscriptions (Gemini, Codex, Claude, ...) as OpenAI-compatible APIs"
+arch=(x86_64)
+url="https://github.com/router-for-me/CLIProxyAPI"
+license=(MIT)
+options=(!strip)
+source=("CLIProxyAPI_${pkgver}_linux_amd64.tar.gz::$url/releases/download/v$pkgver/CLIProxyAPI_${pkgver}_linux_amd64.tar.gz")
+sha256sums=('4c81e8c33c93b153d8013e4f631fc6cdd27325f950acb65a90156a4543bd74af')
+noextract=("CLIProxyAPI_${pkgver}_linux_amd64.tar.gz")
+
+prepare() {
+  mkdir -p src
+  bsdtar -xf "CLIProxyAPI_${pkgver}_linux_amd64.tar.gz" -C src
+}
+
+package() {
+  install -Dm755 src/cli-proxy-api "$pkgdir/usr/bin/cli-proxy-api"
+  install -Dm644 src/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 src/config.example.yaml "$pkgdir/usr/share/doc/$pkgname/config.example.yaml"
+}

@@ -1,0 +1,32 @@
+# xAI/SpaceXAI "Grok Build" CLI (`grok`). Upstream github.com/xai-org/grok-build is source-only and has
+# no GitHub releases; the README's official install route is `curl https://x.ai/cli/install.sh | bash`.
+# That script (read, not run) downloads https://x.ai/cli/grok-<ver>-linux-x86_64{.zst,.gz,} (mirror:
+# storage.googleapis.com/grok-build-public-artifacts/cli/...) where <ver> comes from https://x.ai/cli/stable.
+# Upstream publishes NO checksum or signature; the sha256 below is trust-on-first-use of the .zst, after
+# confirming x.ai and the GCS mirror serve byte-identical files. Bump: read https://x.ai/cli/stable,
+# download the new .zst from both hosts, compare, update pkgver + sha256.
+pkgname=grok-build
+pkgver=1.0.77
+pkgrel=1
+pkgdesc="Grok Build, xAI's terminal AI coding agent (official prebuilt binary)"
+arch=(x86_64)
+url="https://x.ai/cli"
+license=(Apache-2.0)
+depends=(glibc)
+makedepends=(zstd)
+options=(!strip !debug)
+_srcrev=2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8
+source=("grok-$pkgver-linux-x86_64.zst::https://x.ai/cli/grok-$pkgver-linux-x86_64.zst"
+        "LICENSE-$pkgname::https://raw.githubusercontent.com/xai-org/grok-build/$_srcrev/LICENSE")
+noextract=("grok-$pkgver-linux-x86_64.zst")
+sha256sums=('9bcc2226a486514520782de69bb0ba2c2b2dca0c3586d9a1c73f8a3077cccb20'
+            '116f7778b9802e569b7fa3a532b17bd80eb13c67837def01eed093d4ea472f28')
+
+prepare() {
+  zstd -dq -f "grok-$pkgver-linux-x86_64.zst" -o grok
+}
+
+package() {
+  install -Dm755 grok "$pkgdir/usr/bin/grok"
+  install -Dm644 "LICENSE-$pkgname" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

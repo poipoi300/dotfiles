@@ -2,5 +2,10 @@ description = "Desktop applications"
 category    = "apps"
 
 [packages]
-pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager", "ark", "mpv"]
-aur    = ["pear-desktop"]
+local  = ["pear-desktop-poipoi"]   # own fork, replaces the AUR pear-desktop
+pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager",
+          "ark", "mpv", "bitwarden", "qbittorrent", "okular", "libreoffice-fresh", "blender",
+          "obs-studio", "audacity", "handbrake", "ffmpeg", "vapoursynth", "satty", "grim",
+          "slurp", "displaycal", "argyllcms"]
+aur    = ["obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
+          "solidcraft"]

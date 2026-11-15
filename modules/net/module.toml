@@ -1,0 +1,8 @@
+description = "Sync and networking: Syncthing, KDE Connect, WireGuard"
+category    = "apps"
+
+[packages]
+pacman = ["syncthing", "kdeconnect", "wireguard-tools"]
+
+[units]
+user = ["syncthing.service"]

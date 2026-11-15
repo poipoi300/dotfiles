@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "roles": [
+    {
+      "name": "data-profiler",
+      "description": "Profiles a dataset (CSV/Parquet/JSON) and reports schema, nulls, ranges, cardinality, and anomalies. Use before writing any code that consumes a dataset, per the never-assume-data-shape rule.",
+      "brief": "data-profiler.md",
+      "claude": {
+        "model": "inherit",
+        "tools": "Bash, Read, Glob",
+        "maxTurns": 10
+      }
+    },
+    {
+      "name": "Explore",
+      "description": "Fast, read-only codebase search and analysis. Use for file discovery, tracing call sites, and understanding code without modifying it. Returns a tight brief, not file dumps.",
+      "brief": "Explore.md",
+      "claude": {
+        "model": "inherit",
+        "tools": "Read, Grep, Glob"
+      }
+    },
+    {
+      "name": "impeccable-asset-producer",
+      "description": "Produces clean reusable raster assets from approved Impeccable mock references without redesigning the direction.",
+      "brief": "impeccable-asset-producer.md",
+      "claude": {
+        "tools": "Read, Write, Edit, Bash, Glob, Grep",
+        "model": "inherit",
+        "effort": "medium",
+        "maxTurns": 24
+      }
+    },
+    {
+      "name": "impeccable-documenter",
+      "description": "Records DESIGN.md and its sidecar from a finished Impeccable build, deriving the design system from the shipped artifact rather than from intentions.",
+      "brief": "impeccable-documenter.md",
+      "claude": {
+        "tools": "Read, Write, Bash, Glob, Grep",
+        "model": "inherit",
+        "effort": "medium",
+        "maxTurns": 30
+      }
+    },
+    {
+      "name": "impeccable-finish-reviewer",
+      "description": "Reviews a finished Impeccable build against its direction contract, the approved comp, and the chosen world's quality bar, returning an ordered list of material fixes.",
+      "brief": "impeccable-finish-reviewer.md",
+      "claude": {
+        "tools": "Read, Bash, Glob, Grep",
+        "model": "inherit",
+        "effort": "high",
+        "maxTurns": 30
+      }
+    },
+    {
+      "name": "impeccable-manual-edit-applier",
+      "description": "Applies leased Impeccable live manual copy-edit batches to source and returns canonical Apply results.",
+      "brief": "impeccable-manual-edit-applier.md",
+      "claude": {
+        "tools": "Read, Write, Edit, Bash, Glob, Grep",
+        "model": "inherit",
+        "effort": "medium",
+        "maxTurns": 12
+      }
+    },
+    {
+      "name": "ml-reviewer",
+      "description": "Reviews ML code \u2014 training loops, data pipelines, feature engineering, evaluation, hyperparameter searches and how their results are reported \u2014 and runs sanity-check experiments and data analysis to back findings with evidence. Use on feature completion for ML work, alongside reviewer.",
+      "brief": "ml-reviewer.md",
+      "claude": {
+        "model": "inherit",
+        "effort": "high",
+        "tools": "Bash, Read, Grep, Glob",
+        "skills": ["ml-design", "coding"],
+        "maxTurns": 25
+      }
+    },
+    {
+      "name": "reviewer",
+      "description": "Reviews a diff or recently modified files against the coding skill's standards. Use after writing or modifying code, before committing. Returns findings ranked by severity; does not rewrite code.",
+      "brief": "reviewer.md",
+      "claude": {
+        "model": "inherit",
+        "tools": "Read, Grep, Glob, Bash",
+        "skills": ["coding"]
+      }
+    },
+    {
+      "name": "verifier",
+      "description": "Runs the project's tests, type checks, and linters, and reports only failures. Use after edits and before commits to satisfy the verify rule without flooding the main context with test output.",
+      "brief": "verifier.md",
+      "claude": {
+        "model": "inherit",
+        "tools": "Bash, Read, Grep, Glob",
+        "maxTurns": 15
+      }
+    }
+  ]
+}

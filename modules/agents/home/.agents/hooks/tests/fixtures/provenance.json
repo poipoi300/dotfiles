@@ -1,0 +1,10 @@
+{
+  "generated_on": "2026-11-10",
+  "provider": "codex-cli 0.163.0",
+  "command": "codex app-server generate-json-schema --out <temporary-directory>",
+  "files": {
+    "codex-initialize.schema.json": "v1/InitializeParams.json",
+    "codex-rate-limits.schema.json": "v2/GetAccountRateLimitsResponse.json"
+  },
+  "scope": "Installed protocol contracts only. These schemas do not establish live account connectivity, hook trust, or lifecycle acceptance."
+}

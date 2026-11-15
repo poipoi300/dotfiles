@@ -1,0 +1,19 @@
+# Local state written next to the sources when ~/.agents is a repository checkout.
+backups/
+state/
+mcp.json
+machine.json
+/history/
+/memory/
+__pycache__/
+*.pyc
+roles/*-adapter-state.json
+usage/state/
+
+# Read-only account-synced sources and the independently maintained WPO repository.
+skills/docx/
+skills/pdf/
+skills/pptx/
+skills/xlsx/
+skills/sillytavern-cards/
+skills/wp-orchestration/

@@ -2,7 +2,7 @@ description = "PipeWire audio with WirePlumber and the PulseAudio bridge"
 category    = "desktop"
 
 [packages]
-pacman = ["pipewire", "pipewire-pulse", "pipewire-alsa", "wireplumber"]
+pacman = ["pipewire", "pipewire-pulse", "pipewire-alsa", "wireplumber", "easyeffects"]
 
 [units]
 user = ["pipewire.socket", "pipewire-pulse.socket", "wireplumber.service"]

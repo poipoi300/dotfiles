@@ -1,0 +1,17 @@
+{
+  "$comment": "Portable example only. Copy to mcp.json and select the integrations you use. Keep secrets in inherited environment variables; a whole ${VAR} value is translated without copying its value.",
+  "mcpServers": {
+    "example-stdio": {
+      "type": "stdio",
+      "command": "example-mcp",
+      "args": ["serve"],
+      "env": { "EXAMPLE_TOKEN": "${EXAMPLE_TOKEN}" }
+    },
+    "example-http": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "X-API-Key": "${EXAMPLE_API_KEY}" }
+    }
+  },
+  "claudePluginOverrides": {}
+}

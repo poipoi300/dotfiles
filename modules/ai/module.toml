@@ -1,0 +1,10 @@
+description = "Local AI: Ollama (CUDA), CUDA/cuDNN, StabilityMatrix, AI CLIs and CLIProxyAPI"
+category    = "ai"
+
+[packages]
+pacman = ["ollama-cuda", "cuda", "cudnn"]
+aur    = ["stabilitymatrix"]   # rife-ncnn-vulkan (2022) no longer builds against current glslang
+local  = ["cli-proxy-api", "grok-build", "antigravity-cli"]
+
+[units]
+user = ["cli-proxy-api.service"]   # stays inactive until ~/.config/cli-proxy-api/config.yaml exists

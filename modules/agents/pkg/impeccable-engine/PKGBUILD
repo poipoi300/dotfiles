@@ -1,0 +1,27 @@
+# Engine binary of the Impeccable design skill (github.com/pbakaus/impeccable, Apache-2.0).
+# Official release asset `impeccable-linux-x64` of tag engine-v$pkgver, pinned by sha256.
+# Verified: the sha256 below equals the digest GitHub shows for the asset AND the
+# `impeccable-linux-x64` line of the skill's own scripts/engine-checksums.txt for this version.
+# The skill's launcher (skills/impeccable/scripts/impeccable) finds `impeccable` on PATH after an
+# `engine-probe` handshake, and hooks/behavior.py does the same, so no per-user download is needed.
+# Keep pkgver equal to skills/impeccable/scripts/VERSION: when the skill is updated, copy the new
+# line for impeccable-linux-x64 from engine-checksums.txt into sha256sums (tests/test_packaging.py
+# checks this).
+pkgname=impeccable-engine
+pkgver=0.1.18
+pkgrel=1
+pkgdesc="Impeccable design engine (detector/hook CLI used by the impeccable agent skill)"
+arch=(x86_64)
+url="https://github.com/pbakaus/impeccable"
+license=(Apache-2.0)
+options=(!strip !debug)
+source=("impeccable-$pkgver-linux-x64::$url/releases/download/engine-v$pkgver/impeccable-linux-x64"
+        "LICENSE-$pkgname::https://raw.githubusercontent.com/pbakaus/impeccable/engine-v$pkgver/LICENSE")
+sha256sums=('736ed785e74ae2344d3036127f614ddde5ab520a527d8bc82a891612ef71f648'
+            '02bb8c3b4e70190e3986c0404ad2fd8d639b4f534252d82379cc1b502b6d1812')
+noextract=("impeccable-$pkgver-linux-x64")
+
+package() {
+  install -Dm755 "impeccable-$pkgver-linux-x64" "$pkgdir/usr/bin/impeccable"
+  install -Dm644 "LICENSE-$pkgname" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

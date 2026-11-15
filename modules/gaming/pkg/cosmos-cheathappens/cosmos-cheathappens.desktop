@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=CoSMOS (Cheat Happens)
+Comment=Memory scanner and game hacking tool (asks for sudo in the terminal)
+Exec=cosmos-cheathappens
+Terminal=true
+Categories=Game;Utility;

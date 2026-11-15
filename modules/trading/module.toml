@@ -1,0 +1,5 @@
+description = "Interactive Brokers IB Gateway (stable, official installer)"
+category    = "apps"
+
+[packages]
+local = ["ibgateway"]

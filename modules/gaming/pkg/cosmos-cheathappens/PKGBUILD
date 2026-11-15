@@ -1,0 +1,44 @@
+# Cheat Happens "CoSMOS" Steam Deck / Linux memory scanner (Cosmos Linux 1.1 per its bundled Changelog).
+# Official page: https://www.cheathappens.com/cosmos.asp -> "Download CoSMOS Steam Deck" ->
+# https://www.cheathappens.com/download_cosmos.asp?cos=sd&dl=0 which links directly (no form/login) to the zip below
+# on their download host. The URL is unversioned and the zip is dated 2022-03-24; no upstream checksum or signature
+# exists, so the sha256 is trust-on-first-use. If the file ever changes, makepkg fails on purpose: re-inspect first.
+# Needs root to read other processes' memory: run `sudo cosmos-cheathappens` (the .desktop entry opens a terminal).
+pkgname=cosmos-cheathappens
+pkgver=1.1
+pkgrel=1
+pkgdesc="Cheat Happens CoSMOS memory scanner / game hacking tool (Linux and Steam Deck build)"
+arch=(x86_64)
+url="https://www.cheathappens.com/cosmos.asp"
+license=(LicenseRef-proprietary)
+depends=(glibc icu openssl fontconfig libx11 libice libsm sudo)
+optdepends=('xclip: clipboard support')
+options=(!strip !debug)
+source=("CoSMOS-$pkgver.zip::https://www.cheathappensdownloads.com/cosmosdownload/528348cf2c00f4d4445c.zip"
+        "cosmos-cheathappens.desktop")
+noextract=("CoSMOS-$pkgver.zip")
+sha256sums=('1add7256ed0ca593c4c6b5c2e19a524c297c03d806b8e8a5a25c45234d461f12'
+            '7846758c817144b38bd51f561bc586e6f11729658b861082701102134c52af7d')
+
+prepare() {
+  mkdir -p app
+  bsdtar -xf "CoSMOS-$pkgver.zip" -C app
+}
+
+package() {
+  cd app
+  install -Dm755 CosmosLinux "$pkgdir/opt/$pkgname/CosmosLinux"
+  install -Dm644 libHarfBuzzSharp.so libMonoPosixHelper.so libSkiaSharp.so -t "$pkgdir/opt/$pkgname"
+  install -Dm644 Readme.txt Changelog.txt -t "$pkgdir/usr/share/doc/$pkgname"
+
+  install -d "$pkgdir/usr/bin"
+  cat > "$pkgdir/usr/bin/$pkgname" <<'WRAP'
+#!/bin/sh
+# CoSMOS must run as root to scan process memory.
+cd /opt/cosmos-cheathappens || exit 1
+[ "$(id -u)" -eq 0 ] || exec sudo -E ./CosmosLinux "$@"
+exec ./CosmosLinux "$@"
+WRAP
+  chmod 755 "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 "$srcdir/cosmos-cheathappens.desktop" "$pkgdir/usr/share/applications/cosmos-cheathappens.desktop"
+}

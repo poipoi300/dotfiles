@@ -1,10 +1,9 @@
 description = "Animated Wallpaper Engine wallpapers on niri via linux-wallpaperengine"
 category    = "desktop"
+requires    = ["gaming", "niri-desktop"]   # Steam holds Wallpaper Engine's assets and workshop items
 
 [packages]
-pacman = ["steam"]
-aur    = ["linux-wallpaperengine-git"]
+local = ["linux-wallpaperengine-git"]   # patched own build, see pkg/
 
 [units]
 user = ["linux-wallpaperengine.service"]
-now  = false

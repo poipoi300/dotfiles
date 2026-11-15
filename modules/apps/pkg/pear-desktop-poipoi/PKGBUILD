@@ -1,0 +1,67 @@
+# Personal fork of pear-devs/pear-desktop (YouTube Music desktop app) with extra global shortcuts
+# (rewind/seek N seconds, like, dislike, truly-global modifier combos). Replaces the AUR pear-desktop.
+# Source: github.com/poipoi300/youtube-music-more-shortcuts, branch wip/windows-migration-2026-11-pear-desktop
+# (the default branch `master` is based on upstream of Feb 2025 and is 1400+ commits behind; this branch carries
+# the same changes ported onto upstream 3.12.0). Pinned to a commit. Dependencies come from the lockfile
+# (`pnpm install --frozen-lockfile`); the network is used at build time only.
+# Packaging follows the AUR pear-desktop recipe: electron-builder `dir` target against the system Electron.
+pkgname=pear-desktop-poipoi
+_app_id=com.github.th-ch.youtube-music
+_commit=6735ce51e402c220b48226806e3e83879834124b
+_electronversion=43
+pkgver=3.12.1
+pkgrel=1
+pkgdesc="YouTube Music desktop app (pear-desktop), personal fork with extra global shortcuts"
+arch=(x86_64)
+url="https://github.com/poipoi300/youtube-music-more-shortcuts"
+license=(MIT)
+depends=("electron$_electronversion" libsecret)
+makedepends=(git nodejs pnpm)
+provides=("pear-desktop=$pkgver" youtube-music)
+conflicts=(pear-desktop youtube-music)
+options=(!strip !debug)
+source=("git+$url.git#commit=$_commit"
+        "pear-desktop.sh"
+        "$_app_id.desktop")
+sha256sums=('SKIP'
+            'bf77b9390f6657d6b58613600cc76178da9ffa97cce55b8d0ba50b4c2ab7f996'
+            'dd4bcc23a6c9b76223b35f035b85dd38db409633ab596d46a0c6f7517ecfe7cf')
+
+_src=youtube-music-more-shortcuts
+
+prepare() {
+  sed -i "s|@ELECTRONVERSION@|$_electronversion|" "$srcdir/pear-desktop.sh"
+  cd "$_src"
+  export PNPM_HOME="$srcdir/pnpm-home" ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_store_dir="$srcdir/pnpm-store"
+  pnpm install --frozen-lockfile
+}
+
+build() {
+  cd "$_src"
+  export PNPM_HOME="$srcdir/pnpm-home" ELECTRON_SKIP_BINARY_DOWNLOAD=1
+  local electronDist="/usr/lib/electron$_electronversion"
+  local electronVer
+  electronVer="$(sed 's/^v//' "$electronDist/version")"
+  pnpm clean
+  pnpm build
+  pnpm electron-builder --linux dir \
+    -c.electronDist="$electronDist" -c.electronVersion="$electronVer"
+}
+
+package() {
+  cd "$_src"
+  install -Dm644 pack/linux-unpacked/resources/app.asar -t "$pkgdir/usr/lib/pear-desktop/"
+  if [[ -d pack/linux-unpacked/resources/app.asar.unpacked ]]; then
+    cp -a pack/linux-unpacked/resources/app.asar.unpacked "$pkgdir/usr/lib/pear-desktop/"
+  fi
+
+  local i
+  for i in 16 24 32 48 64 128 256 512 1024; do
+    install -Dm644 "assets/generated/icons/png/${i}x${i}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${i}x${i}/apps/$_app_id.png"
+  done
+
+  install -Dm755 "$srcdir/pear-desktop.sh" "$pkgdir/usr/bin/pear-desktop"
+  install -Dm644 "$srcdir/$_app_id.desktop" -t "$pkgdir/usr/share/applications/"
+  install -Dm644 license -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

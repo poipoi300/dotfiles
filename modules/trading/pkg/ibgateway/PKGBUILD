@@ -1,0 +1,43 @@
+# Interactive Brokers IB Gateway, "stable" standalone Linux x64 install4j installer, from the link on
+# https://www.interactivebrokers.com/en/trading/ibgateway-stable.php (download2.interactivebrokers.com).
+# Upstream publishes no checksum/signature and the URL is a ROLLING pointer (no version in the path): when IBKR
+# ships a new stable build the sha256 below stops matching and source verification fails on purpose.
+# The version is reported by .../stable-standalone/version.json ({"buildVersion":"10.50.1g",...}).
+# Bump: curl -s https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/version.json,
+# download the .sh, sha256sum it, update pkgver + sha256sums.
+# The installer is run unattended (-q -dir) inside package() with HOME/temp redirected into $srcdir, so nothing
+# is written outside the build tree; absolute build paths it bakes into text files are stripped afterwards.
+pkgname=ibgateway
+pkgver=10.50.1g
+pkgrel=1
+pkgdesc="Interactive Brokers IB Gateway (stable, standalone, bundled JRE)"
+arch=(x86_64)
+url="https://www.interactivebrokers.com/en/trading/ibgateway-stable.php"
+license=(LicenseRef-custom)
+depends=(libx11 libxext libxrender libxtst libxi freetype2 fontconfig alsa-lib gtk3)
+options=(!strip !debug)
+_installer=ibgateway-stable-standalone-linux-x64.sh
+source=("$pkgname-$pkgver-$_installer::https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/$_installer"
+        "ibgateway.desktop")
+noextract=("$pkgname-$pkgver-$_installer")
+sha256sums=('13dc8bb05cbcec8d1b0bb0b25748447cf85863fb4b94361f57fcd350f35c7a9c'
+            '6e9a71bfcedaeae175f0ac609fe7c237191d0508500d41615ce4033c6874ddb0')
+
+package() {
+  export HOME="$srcdir/home" INSTALL4J_TEMP="$srcdir/tmp"
+  mkdir -p "$HOME" "$INSTALL4J_TEMP"
+  sh "$srcdir/$pkgname-$pkgver-$_installer" -q -dir "$pkgdir/opt/ibgateway" </dev/null
+
+  cd "$pkgdir/opt/ibgateway"
+  # install4j records the staging dir in text files; make them point at /opt/ibgateway.
+  grep -rIlF "$pkgdir" . | while read -r f; do sed -i "s|$pkgdir||g" "$f"; done
+  rm -f uninstall ./*.desktop .install4j/install4j_*.desktop .install4j/installation.log
+  # the installer pointed this at its temporary unpacked JRE; use the bundled one
+  echo /opt/ibgateway/jre > .install4j/inst_jre.cfg
+  chmod -R go-w .
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s /opt/ibgateway/ibgateway "$pkgdir/usr/bin/ibgateway"
+  install -Dm644 "$srcdir/ibgateway.desktop" "$pkgdir/usr/share/applications/ibgateway.desktop"
+  install -Dm644 .install4j/ibgateway.png "$pkgdir/usr/share/pixmaps/ibgateway.png"
+}

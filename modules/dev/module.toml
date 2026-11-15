@@ -3,9 +3,10 @@ category    = "dev"
 groups      = ["docker"]
 
 [packages]
-pacman = ["zed", "docker", "docker-buildx", "docker-compose", "go", "uv",
-          "nodejs", "npm", "pnpm", "bun", "rustup", "clang", "llvm", "lld", "lldb", "cmake",
-          "rust-analyzer", "pyright"]
+pacman = ["zed", "docker", "docker-buildx", "docker-compose", "go", "uv", "nodejs", "npm",
+          "pnpm", "bun", "rustup", "clang", "llvm", "lld", "lldb", "cmake", "rust-analyzer",
+          "pyright", "vulkan-tools", "vulkan-headers", "vulkan-validation-layers", "shaderc"]
+aur    = ["opencode-bin", "claude-code", "openai-codex-bin"]
 
 [units]
 system = ["docker.service", "containerd.service"]

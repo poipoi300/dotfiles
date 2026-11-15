@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=IB Gateway
+Comment=Interactive Brokers Gateway
+Exec=/usr/bin/ibgateway
+Icon=ibgateway
+Categories=Office;Finance;
+StartupWMClass=install4j-ibgateway-GWClient
+Terminal=false

@@ -1,0 +1,14 @@
+// Zed global tasks. See https://zed.dev/docs/tasks
+[
+  {
+    // Zed always bases new worktrees on origin/<default>; rebase them onto
+    // whatever the main checkout currently has checked out instead.
+    "label": "worktree: start from main checkout HEAD",
+    "command": "git",
+    "args": ["checkout", "--detach", "main-worktree/HEAD"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "hooks": ["create_worktree"],
+    "reveal": "no_focus",
+    "hide": "on_success"
+  }
+]

@@ -1,0 +1,15 @@
+[Unit]
+Description=CLIProxyAPI (OpenAI-compatible proxy for CLI AI subscriptions)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/cli-proxy-api/config.yaml
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cli-proxy-api -config %h/.config/cli-proxy-api/config.yaml
+WorkingDirectory=%h/.config/cli-proxy-api
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
