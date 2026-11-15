@@ -1,0 +1,6 @@
+description = "zsh login shell: plugins, fzf, zoxide, starship prompt; starts niri-session on tty1"
+category    = "base"
+
+[packages]
+pacman = ["zsh", "zsh-autosuggestions", "zsh-syntax-highlighting", "zsh-completions",
+          "fzf", "zoxide", "starship", "uv"]

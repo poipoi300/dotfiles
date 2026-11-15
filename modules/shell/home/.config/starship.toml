@@ -1,0 +1,70 @@
+# Port of the old oh-my-posh theme: shell, directory, git and duration on the left, language
+# versions, OS and time on the right, and a "╰─" second line.
+"$schema" = "https://starship.rs/config-schema.json"
+add_newline = false
+command_timeout = 300
+
+format = """
+[](fg:#0077c2)[ $shell](bg:#0077c2 fg:#ffffff)$username\
+[](fg:#0077c2 bg:#FF9248)$directory\
+[](fg:#FF9248 bg:#FFFB38)$git_branch$git_status\
+[](fg:#FFFB38 bg:#83769c)$cmd_duration[](fg:#83769c)
+[╰─](fg:#21c7c7)$character"""
+right_format = "$nodejs$python$java$golang$rust$dotnet$os$time"
+
+[shell]
+disabled = false
+zsh_indicator = "zsh"
+bash_indicator = "bash"
+format = "$indicator "
+style = "bg:#0077c2 fg:#ffffff"
+
+[username]
+show_always = false
+format = "[ ](bg:#ef5350 fg:#FFFB38)"
+
+[directory]
+format = "[  $path ](bg:#FF9248 fg:#2d3436)"
+truncation_length = 4
+truncation_symbol = "…/"
+home_symbol = "~"
+
+[git_branch]
+format = "[ $symbol$branch ](bg:#FFFB38 fg:#011627)"
+symbol = " "
+
+[git_status]
+format = "[($all_status$ahead_behind )](bg:#FFFB38 fg:#011627)"
+
+[cmd_duration]
+min_time = 0
+show_milliseconds = true
+format = "[ 󱦟 $duration ](bg:#83769c fg:#ffffff)"
+
+[character]
+success_symbol = "[❯](fg:#e0f8ff)"
+error_symbol = "[❯](fg:#ef5350)"
+
+[nodejs]
+format = "[  $version ](bg:#303030 fg:#3C873A)"
+[python]
+format = "[  ${version}( $virtualenv) ](bg:#306998 fg:#FFE873)"
+[java]
+format = "[  $version ](bg:#0e8ac8 fg:#ec2729)"
+[golang]
+format = "[  $version ](bg:#ffffff fg:#06aad5)"
+[rust]
+format = "[  $version ](bg:#f3f0ec fg:#925837)"
+[dotnet]
+format = "[  $version ](bg:#0e0e0e fg:#0d6da8)"
+
+[os]
+disabled = false
+format = "[ $symbol ](bg:#b2bec3 fg:#222222)"
+[os.symbols]
+Arch = ""
+
+[time]
+disabled = false
+time_format = "%d,%H:%M"
+format = "[ 󰥔 $time ](bg:#40c4ff fg:#ffffff)"

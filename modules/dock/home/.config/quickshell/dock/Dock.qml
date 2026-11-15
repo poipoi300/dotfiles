@@ -139,7 +139,7 @@ PanelWindow {
                 if (!hovered || win.suppressed) return;
                 const p = point.position;
                 if (!win.magnifying && win.active && p.y > zone.height - win.barZone) win.magnifying = true;
-                win.px = zone.x + p.x;
+                win.pointerMoved(zone.x + p.x);
             }
         }
     }
@@ -178,6 +178,8 @@ PanelWindow {
             else win.closeFolder();
         }
     }
+
+    function pointerMoved(x) { px = x; }
 
     function isFolder(i) {
         const t = i >= 0 && i < n ? items[i].type : "";
@@ -305,12 +307,33 @@ PanelWindow {
         }
     }
 
+    Timer {
+        id: benchTimer
+        property real t0: 0
+        property real dur: 0
+        repeat: true
+        onTriggered: {
+            const t = (Date.now() - t0) / dur;
+            if (t >= 1) { running = false; win.sim = false; win.magnifying = false; return; }
+            // sweep left to right and back, twice
+            const ph = (t * 4) % 2;
+            const f = ph < 1 ? ph : 2 - ph;
+            win.pointerMoved(win.restLeft + f * win.restW);
+        }
+    }
+
     // test / scripting hooks:  qs -c dock ipc call dock <fn>
     IpcHandler {
         target: "dock"
         function simulate(x: real): void {
             win.sim = true; win.active = true; win.magnifying = true;
             win.px = x;
+        }
+        function bench(hz: int, ms: int): void {   // synthetic pointer sweep for profiling
+            benchTimer.interval = Math.max(1, Math.round(1000 / hz));
+            benchTimer.t0 = Date.now(); benchTimer.dur = ms;
+            win.sim = true; win.active = true; win.magnifying = true;
+            benchTimer.running = true;
         }
         function release(): void { win.sim = false; win.magnifying = false; leaveTimer.restart(); }
         function open(i: int): void { win.openFolder(i, true); }
