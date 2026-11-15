@@ -54,7 +54,7 @@ Icons live in `home/.local/share/dock/icons/` (converted to PNG from the Windows
   bottom edge; hides 350 ms after the pointer leaves. It is not revealed at all while the focused
   window is fullscreen or maximized (`hideOnFullscreen`, `hideOnMaximized`).
 - Icons are 30 px and swell to 128 px under the pointer with a cosine wave over 3 neighbours; the
-  slot under the pointer stays under it.
+  point under the pointer stays under it, and the row stays centred (see the comment on `relayout()`).
 - Label above the hovered icon. White dot under running apps (wlr-foreign-toplevel). Click focuses
   the app's window (repeated clicks cycle through several windows), otherwise launches it with a
   single bounce. An app asking for attention hops repeatedly (urgency comes from niri's event stream,

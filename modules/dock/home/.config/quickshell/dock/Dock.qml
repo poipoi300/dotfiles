@@ -94,30 +94,40 @@ PanelWindow {
     }
 
     // ---- layout of the magnification wave ----
+    // Magnification layout. Slot i sits at its resting position plus the growth of every slot
+    // before it, minus half of the wave's total growth. The sum runs over virtual slots outside
+    // the row too, so the wave always adds the same total width: slots far from the pointer sit at
+    // rest -/+ half of it wherever the pointer is (the row stays centred), and the point under the
+    // pointer stays exactly under it (the wave is symmetric around it).
     function relayout() {
         const cnt = n;
         if (!cnt) { sizes = []; lefts = []; return; }
         const R = Items.iconCfg.waveSlots;
+        const amp = (peak - base) * hoverT;
         const u = (px - restLeft) / pitch;
-        const s = new Array(cnt);
-        for (let i = 0; i < cnt; i++) {
-            const d = Math.abs(u - (i + 0.5));
-            let w = d >= R ? 0 : 0.5 * (1 + Math.cos(Math.PI * d / R));
-            w = Math.pow(w, 1.25);
-            s[i] = base + (peak - base) * w * hoverT;
+        const jmin = Math.floor(u - R) - 1;
+        const m = Math.ceil(u + R) + 1 - jmin + 1;
+        const w = new Array(m);
+        const pre = new Array(m + 1);
+        pre[0] = 0;
+        for (let k = 0; k < m; k++) {
+            const d = Math.abs(u - (jmin + k + 0.5));
+            const b = d >= R ? 0 : 0.5 * (1 + Math.cos(Math.PI * d / R));
+            w[k] = amp * Math.pow(b, 1.25);
+            pre[k + 1] = pre[k] + w[k];
         }
-        // keep the slot under the pointer stationary under the pointer
-        const uc = Math.max(0, Math.min(cnt - 1e-6, u));
-        const k = Math.floor(uc);
-        let before = 0;
-        for (let j = 0; j < k; j++) before += s[j] + gap;
-        const mapped = before + (uc - k) * (s[k] + gap);
-        let x = px - mapped + (u - uc) * pitch;
+        const half = pre[m] / 2;
+        const s = new Array(cnt);
         const l = new Array(cnt);
-        for (let i = 0; i < cnt; i++) { l[i] = x; x += s[i] + gap; }
+        for (let i = 0; i < cnt; i++) {
+            const k = i - jmin;
+            s[i] = base + (k >= 0 && k < m ? w[k] : 0);
+            l[i] = restLeft + i * pitch + pre[Math.max(0, Math.min(m, k))] - half;
+        }
         sizes = s;
         lefts = l;
-        hoverIndex = (hoverT > 0.2 && u >= 0 && u < cnt) ? k : -1;
+        const f = Math.floor(u);
+        hoverIndex = (hoverT > 0.2 && f >= 0 && f < cnt) ? f : -1;
     }
     onHoverIndexChanged: if (folderHoverTimer.running) folderHoverTimer.restart()
     onNChanged: relayout()
@@ -236,10 +246,12 @@ PanelWindow {
 
         Rectangle {
             id: bar
-            readonly property real l: win.n ? win.lefts[0] - win.padX : win.restLeft
-            readonly property real r: win.n ? win.lefts[win.n - 1] + win.sizes[win.n - 1] + win.padX : win.restLeft
-            x: l
-            width: r - l
+            // centred on the screen; grows symmetrically to cover whichever end extends further
+            readonly property real half: win.n
+                ? Math.max(win.winW / 2 - win.lefts[0], win.lefts[win.n - 1] + win.sizes[win.n - 1] - win.winW / 2) + win.padX
+                : win.restW / 2
+            x: win.winW / 2 - half
+            width: 2 * half
             y: win.barBottom - win.barH
             height: win.barH
             radius: Items.style.radius
@@ -352,6 +364,10 @@ PanelWindow {
             benchTimer.t0 = Date.now(); benchTimer.dur = ms;
             win.sim = true; win.active = true; win.magnifying = true;
             benchTimer.running = true;
+        }
+        function layout(): string {   // geometry dump for checking centring
+            return JSON.stringify({ first: win.lefts[0], last: win.lefts[win.n - 1], lastSize: win.sizes[win.n - 1],
+                barX: bar.x, barW: bar.width, barCentre: bar.x + bar.width / 2, winCentre: win.winW / 2, hover: win.hoverIndex });
         }
         function release(): void { win.sim = false; win.magnifying = false; leaveTimer.restart(); }
         function open(i: int): void { win.openFolder(i, true); }
