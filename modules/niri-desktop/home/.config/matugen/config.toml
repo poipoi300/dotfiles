@@ -1,0 +1,6 @@
+# User templates, run by DankMaterialShell after its own on every theme change.
+[config]
+
+[templates.fuzzel]
+input_path = '~/.config/matugen/templates/fuzzel-colors.ini'
+output_path = '~/.cache/fuzzel-colors.ini'

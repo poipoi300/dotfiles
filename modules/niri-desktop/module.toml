@@ -6,7 +6,7 @@ requires    = ["audio"]
 pacman = ["niri", "xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-gtk",
           "polkit-gnome", "qt5-wayland", "qt6-wayland", "cliphist", "fuzzel", "matugen", "cava",
           "networkmanager", "network-manager-applet", "alacritty", "ttf-firacode-nerd",
-          "quickshell", "xdg-utils"]
+          "quickshell", "xdg-utils", "inter-font"]
 aur    = ["dms-shell-bin"]
 
 [units]
