@@ -1,0 +1,7 @@
+singleton Items Items.qml
+singleton Windows Windows.qml
+Dock 1.0 Dock.qml
+DockItem 1.0 DockItem.qml
+DockIcon 1.0 DockIcon.qml
+FolderPanel 1.0 FolderPanel.qml
+FolderCell 1.0 FolderCell.qml

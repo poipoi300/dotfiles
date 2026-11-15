@@ -1,0 +1,17 @@
+[Unit]
+Description=Dock (Quickshell)
+# Same session binding as dms.service
+PartOf=niri.service
+After=niri.service
+
+[Service]
+ExecStart=/usr/bin/quickshell -c dock
+Restart=on-failure
+RestartSec=3
+# Apps launched from the dock must survive a dock restart.
+KillMode=process
+# The icon theme the bar uses; change it here if you switch themes.
+Environment=QS_ICON_THEME=breeze-dark
+
+[Install]
+WantedBy=niri.service

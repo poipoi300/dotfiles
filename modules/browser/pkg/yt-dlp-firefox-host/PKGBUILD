@@ -1,0 +1,29 @@
+# Native messaging host for the "yt-dlp downloader" extension (yt_dlp_firefox@tyilo.com),
+# installed system-wide so every Gecko browser (Zen, Firefox, LibreWolf) finds it.
+pkgname=yt-dlp-firefox-host
+_commit=b7fad9ca032aea60a6056dc6f8eac4dc8da677a7
+pkgver=0.2.2
+pkgrel=1
+pkgdesc="Native messaging host for the yt-dlp downloader browser extension"
+arch=(any)
+url="https://github.com/Tyilo/yt_dlp_firefox"
+license=(MIT)
+depends=(python yt-dlp xdg-utils)
+makedepends=(git)
+source=("git+https://github.com/Tyilo/yt_dlp_firefox.git#commit=$_commit")
+sha256sums=('SKIP')
+
+prepare() {
+  cd yt_dlp_firefox/helper
+  # "Show in folder" called nautilus; open the containing folder with the default file manager.
+  sed -i 's|Popen(\["nautilus", "--", path\])|Popen(["xdg-open", os.path.dirname(path)])|' yt_dlp_firefox
+  grep -q 'os.path.dirname(path)' yt_dlp_firefox
+  sed -i 's|@HOME@/native-messaging-hosts/yt_dlp_firefox|/usr/lib/yt-dlp-firefox-host/yt_dlp_firefox|' yt_dlp_firefox.json
+}
+
+package() {
+  cd yt_dlp_firefox
+  install -Dm755 helper/yt_dlp_firefox "$pkgdir/usr/lib/yt-dlp-firefox-host/yt_dlp_firefox"
+  install -Dm644 helper/yt_dlp_firefox.json "$pkgdir/usr/lib/mozilla/native-messaging-hosts/yt_dlp_firefox.json"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,10 @@
+description = "Animated Wallpaper Engine wallpapers on niri via linux-wallpaperengine"
+category    = "desktop"
+
+[packages]
+pacman = ["steam"]
+aur    = ["linux-wallpaperengine-git"]
+
+[units]
+user = ["linux-wallpaperengine.service"]
+now  = false

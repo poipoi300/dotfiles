@@ -1,0 +1,47 @@
+{
+  "style": {
+    "font": "Inter Variable",
+    "radius": 16,
+    "background": "#d9181825",
+    "border": "#26cdd6f4",
+    "text": "#ffffff",
+    "labelBackground": "#ee11111b",
+    "panelBackground": "#f71e1e2e",
+    "accent": "#cba6f7"
+  },
+  "icon": { "size": 30, "peak": 128, "spacing": 8, "waveSlots": 3 },
+  "behavior": {
+    "output": "",
+    "hideOnFullscreen": true,
+    "hideOnMaximized": true,
+    "folderHoverDelayMs": 350,
+    "folderLeaveDelayMs": 450,
+    "thumbnails": true
+  },
+  "items": [
+    { "type": "app", "name": "Zen", "desktop": ["zen", "zen-browser"] },
+    { "type": "app", "name": "Steam", "desktop": ["steam"] },
+    { "type": "app", "name": "Discord", "desktop": ["discord", "vesktop"] },
+    { "type": "app", "name": "YouTube Music", "desktop": ["pear-desktop"] },
+    {
+      "type": "group", "name": "Launchers",
+      "items": [
+        { "type": "command", "name": "Ubisoft Connect", "command": ["lutris", "lutris:rungame/ubisoft-connect"],
+          "icon": "lutris_ubisoft-connect", "fallbackIcon": "lutris", "requiresIcon": true, "match": ["ubisoft-connect", "upc.exe"] },
+        { "type": "app", "name": "Heroic (Epic Games)", "desktop": ["com.heroicgameslauncher.hgl", "heroic"] },
+        { "type": "command", "name": "Battle.net", "command": ["lutris", "lutris:rungame/battlenet"],
+          "icon": "lutris_battlenet", "fallbackIcon": "lutris", "requiresIcon": true, "match": ["battlenet", "battle.net.exe"] },
+        { "type": "command", "name": "Rockstar Games Launcher", "command": ["lutris", "lutris:rungame/rockstar-games-launcher"],
+          "icon": "lutris_rockstar-games-launcher", "fallbackIcon": "lutris", "requiresIcon": true, "match": ["rockstar-games-launcher", "launcherpatcher.exe"] }
+      ]
+    },
+    { "type": "app", "name": "Bitwarden", "desktop": ["bitwarden", "Bitwarden"] },
+    { "type": "dir", "name": "Games", "path": "~/Documents/Games", "icon": "icons/games-folder.png" },
+    { "type": "dir", "name": "Misc", "path": "~/Documents/Misc", "icon": "icons/misc-folder.png" },
+    { "type": "dir", "name": "Anime", "path": "/mnt/bigbois/Anime", "icon": "icons/anime-folder.png" },
+    { "type": "app", "name": "Krita", "desktop": ["org.kde.krita", "krita"] },
+    { "type": "app", "name": "StabilityMatrix", "desktop": ["StabilityMatrix", "stabilitymatrix", "stability-matrix"] },
+    { "type": "command", "name": "Start With Tavern", "command": ["start-tavern"], "icon": "icons/tavern.png" },
+    { "type": "app", "name": "FilmCraft", "desktop": ["filmcraft", "FilmCraft"], "fallbackIcon": "applications-multimedia" }
+  ]
+}

@@ -1,0 +1,14 @@
+description = "Auto-hiding magnifying dock with nestable folders (Quickshell, niri)"
+category    = "desktop"
+
+[packages]
+# quickshell pulls in qt6-declarative (FolderListModel), qt6-svg and the Wayland plugins.
+# xdg-utils: files in directory folders open with xdg-open.
+pacman = ["quickshell", "xdg-utils"]
+aur    = []
+local  = []
+
+[units]
+system = []
+user   = ["dock.service"]
+now    = false

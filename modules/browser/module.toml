@@ -1,0 +1,8 @@
+description = "Zen browser: extensions installed by policy, yt-dlp downloader helper"
+category    = "apps"
+requires    = []
+
+[packages]
+pacman = ["yt-dlp", "yt-dlp-ejs", "python"]
+aur    = ["zen-browser-bin"]
+local  = ["yt-dlp-firefox-host"]
