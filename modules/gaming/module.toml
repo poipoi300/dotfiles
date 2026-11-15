@@ -1,0 +1,5 @@
+description = "Gaming: Steam, MangoHud and GOverlay"
+category    = "games"
+
+[packages]
+pacman = ["steam", "mangohud", "goverlay"]

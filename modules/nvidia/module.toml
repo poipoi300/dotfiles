@@ -1,0 +1,5 @@
+description = "NVIDIA extras on top of the machine's driver: settings app, container toolkit"
+category    = "system"
+
+[packages]
+pacman = ["nvidia-settings", "nvidia-container-toolkit", "libva-nvidia-driver"]

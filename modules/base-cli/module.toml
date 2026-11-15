@@ -1,0 +1,10 @@
+description = "Base command-line system: build tools, git, editors, monitors, AUR helper"
+category    = "base"
+
+[packages]
+pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7zip", "micro",
+          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python"]
+aur    = ["yay"]
+
+[units]
+system = ["fstrim.timer"]
