@@ -19,7 +19,8 @@ apps started from the dock survive a dock restart. Commands such as `start-taver
 Logs: `journalctl --user -u dock`. Config changes are picked up live (no restart).
 
 For testing a checkout, `DOCK_DATA_DIR=<dir>` replaces `~/.local/share/dock`. Scripting hooks:
-`qs -c dock ipc call dock reveal|hide|simulate <x>|release|open <i>|close|enter <name>|back`.
+`qs -c dock ipc call dock reveal|hide|simulate <x>|release|open <i>|close|enter <name>|back|bench <events-per-s> <ms>`
+(`bench` sweeps a synthetic pointer across the dock for profiling; pair it with `QSG_RENDER_TIMING=1`).
 
 ## Editing items
 
@@ -70,7 +71,7 @@ Icons live in `home/.local/share/dock/icons/` (converted to PNG from the Windows
 
 - Performance: no timers poll anything. The window is idle unless something moves; icons are fixed
   128 px textures that are only scaled (GPU transform, no relayout), and only the wave maths runs
-  per pointer movement. The layer surface is 1400x680, transparent, and its input region is just the
+  per rendered frame: pointer events only store a target and one `FrameAnimation` advances the wave and lays out once per frame (it stops when settled). The layer surface is 1400x680, transparent, and its input region is just the
   dock zone (a 4 px strip while hidden) plus the open panel, so it never blocks other windows.
 - Window state, urgency and the config are event driven (foreign-toplevel signals, one long-lived
   `niri msg event-stream`, file watching). Directory existence is checked on config load and each

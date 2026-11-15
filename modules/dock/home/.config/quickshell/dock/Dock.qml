@@ -47,11 +47,27 @@ PanelWindow {
     readonly property bool wantMag: active && magnifying && pointerIn
     property real reveal: active ? 1 : 0
     Behavior on reveal { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    property real hoverT: (folderOpen && folderPanel.hovered) ? 1 : (wantMag ? 1 : 0)
-    Behavior on hoverT { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
-    Behavior on px {
-        enabled: win.hoverT > 0.05
-        SpringAnimation { spring: 5; damping: 0.55; epsilon: 0.25 }
+    // Pointer events only store a target. One FrameAnimation advances px/hoverT toward their
+    // targets and lays out once per rendered frame, so the work no longer scales with the input
+    // event rate and never restarts an animation per event. It stops itself when settled.
+    readonly property real hoverTarget: (folderOpen && folderPanel.hovered) ? 1 : (wantMag ? 1 : 0)
+    property real hoverT: 0
+    property real pxTarget: winW / 2
+    onHoverTargetChanged: smoother.start()
+    FrameAnimation {
+        id: smoother
+        onTriggered: {
+            const dt = Math.min(frameTime, 0.05);
+            const kp = 1 - Math.exp(-dt * 38);      // pointer follow, ~26 ms time constant
+            const kh = 1 - Math.exp(-dt * 16);      // magnify in/out, ~60 ms
+            let busy = false;
+            let dx = win.pxTarget - win.px;
+            if (Math.abs(dx) > 0.15) { win.px += dx * kp; busy = true; } else win.px = win.pxTarget;
+            let dh = win.hoverTarget - win.hoverT;
+            if (Math.abs(dh) > 0.002) { win.hoverT += dh * kh; busy = true; } else win.hoverT = win.hoverTarget;
+            win.relayout();
+            if (!busy) stop();
+        }
     }
 
     // ---- window ----
@@ -103,11 +119,9 @@ PanelWindow {
         lefts = l;
         hoverIndex = (hoverT > 0.2 && u >= 0 && u < cnt) ? k : -1;
     }
-    onPxChanged: relayout()
     onHoverIndexChanged: if (folderHoverTimer.running) folderHoverTimer.restart()
-    onHoverTChanged: relayout()
     onNChanged: relayout()
-    onRestLeftChanged: { if (hoverT === 0) { px = winW / 2; } relayout(); }
+    onRestLeftChanged: { if (hoverT === 0) { px = winW / 2; pxTarget = px; } relayout(); }
     Component.onCompleted: relayout()
 
     // ---- input zone ----
@@ -179,7 +193,11 @@ PanelWindow {
         }
     }
 
-    function pointerMoved(x) { px = x; }
+    function pointerMoved(x) {
+        pxTarget = x;
+        if (hoverT < 0.02) px = x;      // first contact: no slide-in from the old position
+        smoother.start();
+    }
 
     function isFolder(i) {
         const t = i >= 0 && i < n ? items[i].type : "";
@@ -327,7 +345,7 @@ PanelWindow {
         target: "dock"
         function simulate(x: real): void {
             win.sim = true; win.active = true; win.magnifying = true;
-            win.px = x;
+            win.pointerMoved(x);
         }
         function bench(hz: int, ms: int): void {   // synthetic pointer sweep for profiling
             benchTimer.interval = Math.max(1, Math.round(1000 / hz));
