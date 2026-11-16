@@ -3,9 +3,9 @@ category    = "base"
 
 [packages]
 pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7zip", "micro",
-          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh"]
+          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh", "pacman-contrib"]
 aur    = ["yay"]
 
 [units]
-system = ["fstrim.timer", "systemd-timesyncd.service"]
+system = ["fstrim.timer", "systemd-timesyncd.service", "paccache.timer"]   # paccache: keep 3 versions, weekly
 user   = ["ssh-agent.socket"]   # socket-activated; the service has no [Install]
