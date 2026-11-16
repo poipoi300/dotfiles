@@ -16,8 +16,15 @@ Windows-style middle-button autoscroll in every app.
     pointer input until niri sends it an enter event carrying the position (one or two frames),
     then turns click-through again. The app under the pointer sees a brief leave/enter.
   - It draws a ring with four arrowheads at the press point and, at the hand position, a
-    triangle pointing the way it scrolls (a dot inside the dead zone). The real pointer stays
-    visible at the ring: on Wayland only the app under the pointer chooses its image.
+    triangle pointing the way it scrolls (a dot inside the dead zone). It hides the real
+    pointer with `niri msg action hide-cursor` (niri-poipoi, niri-desktop module) and shows it
+    again when the scroll ends, running the two in order; niri also shows it on any real motion,
+    click or tablet input, so a crashed helper can't leave it hidden.
+  - The daemon passes Super + middle through untouched (`SUPER_PASSTHROUGH`), so niri's
+    Mod + middle-drag view panning keeps working (this assumes niri's Mod is Super, its
+    default). The keyboards that have a Super key stay open without their events being read;
+    on each middle press the daemon asks the kernel for their held keys (EVIOCGKEY) and checks
+    only the two Super bits.
   - The overlay opens on niri's focused output, so with several monitors the marks only show on
     that one (scrolling works everywhere). Upstream's badge and ghost-cursor code is left in the
     file unused, to keep the patch small.

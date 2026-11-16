@@ -1,0 +1,126 @@
+diff --git a/niri-config/src/binds.rs b/niri-config/src/binds.rs
+index 0be7596..15db8e9 100644
+--- a/niri-config/src/binds.rs
++++ b/niri-config/src/binds.rs
+@@ -106,6 +106,8 @@ pub enum Action {
+     Suspend,
+     PowerOffMonitors,
+     PowerOnMonitors,
++    HideCursor,
++    ShowCursor,
+     ToggleDebugTint,
+     DebugToggleOpaqueRegions,
+     DebugToggleDamage,
+@@ -398,6 +400,8 @@ impl From<niri_ipc::Action> for Action {
+             niri_ipc::Action::Quit { skip_confirmation } => Self::Quit(skip_confirmation),
+             niri_ipc::Action::PowerOffMonitors {} => Self::PowerOffMonitors,
+             niri_ipc::Action::PowerOnMonitors {} => Self::PowerOnMonitors,
++            niri_ipc::Action::HideCursor {} => Self::HideCursor,
++            niri_ipc::Action::ShowCursor {} => Self::ShowCursor,
+             niri_ipc::Action::Spawn { command } => Self::Spawn(command),
+             niri_ipc::Action::SpawnSh { command } => Self::SpawnSh(command),
+             niri_ipc::Action::DoScreenTransition { delay_ms } => Self::DoScreenTransition(delay_ms),
+diff --git a/niri-ipc/src/lib.rs b/niri-ipc/src/lib.rs
+index 0aa3cb4..7fc8ac2 100644
+--- a/niri-ipc/src/lib.rs
++++ b/niri-ipc/src/lib.rs
+@@ -202,6 +202,12 @@ pub enum Action {
+     PowerOffMonitors {},
+     /// Power on all monitors via DPMS.
+     PowerOnMonitors {},
++    /// Hide the pointer until it moves, a pointer button is pressed, or show-cursor.
++    ///
++    /// The pointer keeps its focus and hover state; only drawing it is skipped.
++    HideCursor {},
++    /// Show a pointer hidden with hide-cursor.
++    ShowCursor {},
+     /// Spawn a command.
+     Spawn {
+         /// Command to spawn.
+diff --git a/src/input/mod.rs b/src/input/mod.rs
+index f1ad493..286748b 100644
+--- a/src/input/mod.rs
++++ b/src/input/mod.rs
+@@ -142,6 +142,24 @@ impl State {
+             self.niri.reset_pointer_inactivity_timer();
+         }
+ 
++        // Real pointer or tablet motion, or a button, ends hide-cursor, so a client that hid the
++        // pointer can never leave it hidden. Scrolling keeps it hidden.
++        if self.niri.pointer_hidden_by_action
++            && matches!(
++                event,
++                InputEvent::PointerMotion { .. }
++                    | InputEvent::PointerMotionAbsolute { .. }
++                    | InputEvent::PointerButton { .. }
++                    | InputEvent::TabletToolAxis { .. }
++                    | InputEvent::TabletToolButton { .. }
++                    | InputEvent::TabletToolProximity { .. }
++                    | InputEvent::TabletToolTip { .. }
++            )
++        {
++            self.niri.pointer_hidden_by_action = false;
++            self.niri.queue_redraw_all();
++        }
++
+         let hide_hotkey_overlay =
+             self.niri.hotkey_overlay.is_open() && should_hide_hotkey_overlay(&event);
+ 
+@@ -682,6 +700,16 @@ impl State {
+             Action::PowerOnMonitors => {
+                 self.niri.activate_monitors(&mut self.backend);
+             }
++            Action::HideCursor => {
++                self.niri.pointer_hidden_by_action = true;
++                self.niri.queue_redraw_all();
++            }
++            Action::ShowCursor => {
++                if self.niri.pointer_hidden_by_action {
++                    self.niri.pointer_hidden_by_action = false;
++                    self.niri.queue_redraw_all();
++                }
++            }
+             Action::ToggleDebugTint => {
+                 self.backend.toggle_debug_tint();
+                 self.niri.queue_redraw_all();
+@@ -4594,6 +4622,8 @@ fn allowed_when_locked(action: &Action) -> bool {
+             | Action::Suspend
+             | Action::PowerOffMonitors
+             | Action::PowerOnMonitors
++            | Action::HideCursor
++            | Action::ShowCursor
+             | Action::SwitchLayout(_)
+             | Action::ToggleKeyboardShortcutsInhibit
+     )
+diff --git a/src/niri.rs b/src/niri.rs
+index ec40e01..64ceeb9 100644
+--- a/src/niri.rs
++++ b/src/niri.rs
+@@ -356,6 +356,8 @@ pub struct Niri {
+     /// which passes it down through grabs, which decide what to do with it as they see fit.
+     pub pointer_contents: PointContents,
+     pub pointer_visibility: PointerVisibility,
++    /// Set by the hide-cursor action: the pointer is not drawn, but keeps its focus.
++    pub pointer_hidden_by_action: bool,
+     pub pointer_inactivity_timer: Option<RegistrationToken>,
+     /// Whether the pointer inactivity timer got reset this event loop iteration.
+     ///
+@@ -2575,6 +2577,7 @@ impl Niri {
+             dnd_icon: None,
+             pointer_contents: PointContents::default(),
+             pointer_visibility: PointerVisibility::Visible,
++            pointer_hidden_by_action: false,
+             pointer_inactivity_timer: None,
+             pointer_inactivity_timer_got_reset: false,
+             notified_activity_this_iteration: false,
+@@ -3690,6 +3693,10 @@ impl Niri {
+         push: &mut dyn FnMut(PointerRenderElements<R>),
+     ) {
+         let _span = tracy_client::span!("Niri::render_pointer");
++
++        if self.pointer_hidden_by_action {
++            return;
++        }
+         let output_scale = output.current_scale();
+         let output_pos = self.global_space.output_geometry(output).unwrap().loc;
+ 

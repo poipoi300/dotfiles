@@ -3,7 +3,7 @@
 # midscroll-apply are left out (settings live in the module's /etc/midscroll.conf).
 pkgname=midscroll
 pkgver=1.15
-pkgrel=4
+pkgrel=5
 pkgdesc="Windows-style middle-button drag autoscroll (evdev/uinput, works on Wayland and X11)"
 arch=(any)
 url="https://github.com/gnhen/midscroll"
@@ -12,13 +12,14 @@ depends=(python python-evdev python-gobject python-cairo gtk4 gtk4-layer-shell)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/gnhen/midscroll/archive/refs/tags/v$pkgver.tar.gz"
         niri.patch)
 sha256sums=('8f0133be724b231ed7443fa1184491b92b5a071e5ac0a8b3a7d97300ed96c4fa'
-            'c7e101a29babe122d299c2cda94447aa37216490f2dfe1acea89a65a7c522aca')
+            '05ebf2ea3a0381a3a8f59414e0752b2e07b64c51807b122f4eac351200b3571e')
 
 prepare() {
   cd "$pkgname-$pkgver"
-  # niri support for the session helper: the focused window for the app blacklist comes from
-  # niri's event stream, the pointer position from a brief pointer-enter probe, and the marks
-  # are a ring at the press point and a triangle at the hand pointing the way it scrolls.
+  # niri support: the focused window for the app blacklist comes from niri's event stream, the
+  # pointer position from a brief pointer-enter probe, the marks are a ring at the press point
+  # and a triangle at the hand pointing the way it scrolls, the real pointer is hidden with
+  # niri-poipoi's hide-cursor action, and Super + middle passes through to the compositor.
   patch -p1 < "$srcdir/niri.patch"
 }
 

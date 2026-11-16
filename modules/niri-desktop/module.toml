@@ -3,11 +3,12 @@ category    = "desktop"
 requires    = ["audio"]
 
 [packages]
-pacman = ["niri", "xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-gtk",
+pacman = ["xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-gtk",
           "polkit-gnome", "qt5-wayland", "qt6-wayland", "cliphist", "fuzzel", "matugen", "cava",
           "networkmanager", "network-manager-applet", "ghostty", "ttf-firacode-nerd",
           "quickshell", "xdg-utils", "inter-font"]
 aur    = ["dms-shell-bin"]
+local  = ["niri-poipoi"]   # niri + hide-cursor/show-cursor actions (autoscroll)
 
 [units]
 system = ["NetworkManager.service", "NetworkManager-dispatcher.service"]
