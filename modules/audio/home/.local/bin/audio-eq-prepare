@@ -5,7 +5,19 @@ config=${XDG_CONFIG_HOME:-"$HOME/.config"}/easyeffects/db/easyeffectsrc
 mkdir -p "$(dirname "$config")"
 sink=alsa_output.usb-SMSL_SMSL_USB_AUDIO-00.analog-stereo
 # Discover the serial-bearing node locally; never store its identifier in the repo.
-source=$(pactl -f json list sources | jq -er '[.[] | select(.name | startswith("alsa_input.usb-PreSonus_Revelator_IO_24_"))] | if length == 1 then .[0].name else error("Expected one Revelator input") end')
+source_info=$(pactl -f json list sources | jq -ec '[.[] | select(.name | startswith("alsa_input.usb-PreSonus_Revelator_IO_24_"))] | if length == 1 then .[0] else error("Expected one Revelator input") end')
+source=$(printf '%s' "$source_info" | jq -er .name)
+# Autoload keys use route descriptions, not PulseAudio port names. All device
+# identifiers are discovered locally and remain outside the public module.
+autoload_dir=${XDG_DATA_HOME:-"$HOME/.local/share"}/easyeffects/autoload/input
+mkdir -p "$autoload_dir"
+printf '%s' "$source_info" | jq -r '([.ports[]?.description, ""] | unique)[]' |
+while IFS= read -r route; do
+    filename=$(printf '%s:%s' "$source" "$route" | tr '/' '_')
+    tmp=$(mktemp "$autoload_dir/.autoload.XXXXXX")
+    printf '%s' "$source_info" | jq --arg route "$route" '{device:.name,"device-description":.description,"device-profile":$route,"preset-name":"Mic"}' >"$tmp"
+    mv -f "$tmp" "$autoload_dir/$filename.json"
+done
 write() { kwriteconfig6 --file "$config" --group "$1" --key "$2" "$3"; }
 write StreamOutputs useDefaultOutputDevice false
 write StreamOutputs outputDevice "$sink"
@@ -13,8 +25,11 @@ write StreamInputs useDefaultInputDevice false
 write StreamInputs inputDevice "$source"
 write EffectsPipelines bypass false
 write EffectsPipelines resetBypassOnDeviceChange false
-# Rocker state is authoritative; device autoload would override Off on reconnect.
+# Output rocker state is authoritative; only the input uses device autoload.
 write Presets lastLoadedOutputPreset 'Output Off'
-write Presets lastLoadedInputPreset 'Mic Off'
+write Presets lastLoadedInputPreset Mic
+write EffectsPipelines processAllInputs true
+write Window inputAutoloadingUsesFallback true
+write Window inputAutoloadingFallbackPreset Mic
 write Window noWindowAfterStarting true
 write Window enableServiceMode true

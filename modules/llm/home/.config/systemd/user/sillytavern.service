@@ -1,0 +1,17 @@
+[Unit]
+Description=SillyTavern (127.0.0.1:8000)
+ConditionPathExists=%h/src/SillyTavern-local/node_modules
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/SillyTavern-local
+Environment=NODE_ENV=production
+# --global keeps config.yaml and data/ in ~/.local/share/SillyTavern, outside the clone.
+ExecStart=/usr/bin/node server.js --global --port 8000 --browserLaunchEnabled=false
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

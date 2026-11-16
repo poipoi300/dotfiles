@@ -1,8 +1,8 @@
 {
   "id": "audioEq",
   "name": "Audio EQ Rocker",
-  "description": "Headphones | Off | Speakers, with independent mic processing",
-  "version": "1.0.0",
+  "description": "Headphones / Speakers EQ; click the active option to turn output effects off",
+  "version": "1.1.0",
   "author": "Audio module contributors",
   "type": "widget",
   "capabilities": ["dankbar-widget"],

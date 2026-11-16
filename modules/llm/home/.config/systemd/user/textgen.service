@@ -1,0 +1,20 @@
+[Unit]
+Description=text-generation-webui (UI 127.0.0.1:7860, API 127.0.0.1:5000)
+ConditionPathExists=%h/src/textgen/.venv/bin/python
+ConditionPathExists=%h/.config/llm/paths.env
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/textgen
+EnvironmentFile=%h/.config/llm/paths.env
+Environment=PYTHONNOUSERSITE=1 HF_HOME=%h/.cache/huggingface GRADIO_ANALYTICS_ENABLED=False
+# Writable model dir made of symlinks into the read-only model store (see README).
+ExecStartPre=%h/.local/bin/llm-setup models-overlay
+ExecStart=%h/src/textgen/.venv/bin/python server.py --api --listen --listen-host 127.0.0.1 --model-dir %h/.local/share/textgen/models
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

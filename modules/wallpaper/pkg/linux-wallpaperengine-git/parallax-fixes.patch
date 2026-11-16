@@ -1,27 +1,21 @@
 diff --git a/src/WallpaperEngine/Render/Objects/CImage.cpp b/src/WallpaperEngine/Render/Objects/CImage.cpp
-index 470e2950..5887ccab 100644
+index 470e2950..06b6dd0d 100644
 --- a/src/WallpaperEngine/Render/Objects/CImage.cpp
 +++ b/src/WallpaperEngine/Render/Objects/CImage.cpp
-@@ -1113,9 +1113,19 @@ void CImage::updateScreenSpacePosition () {
- 	const double parallaxAmount = this->getScene ().getScene ().camera.parallax.amount->value->getFloat ();
+@@ -1113,9 +1113,12 @@ void CImage::updateScreenSpacePosition () {
+-	const double parallaxAmount = this->getScene ().getScene ().camera.parallax.amount->value->getFloat ();
  	const glm::vec2 depth = this->getImage ().parallaxDepth->value->getVec2 ();
  	const glm::vec2* displacement = this->getScene ().getParallaxDisplacement ();
 -	const float referenceSize = static_cast<float> (this->getScene ().getWidth ());
 -	float x = (depth.x + parallaxAmount) * displacement->x * referenceSize;
 -	float y = (depth.y + parallaxAmount) * displacement->y * referenceSize;
-+	// Scale each axis by its own scene dimension: using the width for y over-shifts vertically
-+	// on wide scenes (3.6x on 32:9) and exposes the clear colour above and below.
++	// Scale each axis by its own scene dimension, including on wide scenes.
 +	const float sceneWidth = static_cast<float> (this->getScene ().getWidth ());
 +	const float sceneHeight = static_cast<float> (this->getScene ().getHeight ());
-+	float x = (depth.x + parallaxAmount) * displacement->x * sceneWidth;
-+	float y = (depth.y + parallaxAmount) * displacement->y * sceneHeight;
-+	// A layer that spans the whole scene on an axis (a background) may only move as far as it
-+	// overhangs the scene edges on that axis, so the clear colour never shows behind it.
-+	// m_pos holds the layer's edges: x = left, y = bottom, z = right, w = top.
-+	if (this->m_pos.x <= 0.0f && this->m_pos.z >= sceneWidth)
-+	    x = glm::clamp (x, -(this->m_pos.z - sceneWidth), -this->m_pos.x);
-+	if (this->m_pos.y <= 0.0f && this->m_pos.w >= sceneHeight)
-+	    y = glm::clamp (y, -(this->m_pos.w - sceneHeight), -this->m_pos.y);
++	// CScene already applies the global amount to displacement. Depth is a multiplier:
++	// adding the amount here moves zero-depth layers and over-amplifies shallow backgrounds.
++	const float x = depth.x * displacement->x * sceneWidth;
++	const float y = depth.y * displacement->y * sceneHeight;
  	mvp = glm::translate (mvp, { x, y, 0.0f });
      }
  

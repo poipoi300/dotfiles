@@ -12,3 +12,10 @@ Per-wallpaper properties are reserved until the renderer supports their scope.
 Until the first Apply, wallpaper.env supplies WPE_BG and optional WPE_OUTPUT.
 Delete assignments.json to return to that legacy configuration.
 Do not run alongside another wallpaper renderer on the same output.
+
+The launcher now requires wpe-gallery-launch (gallery 0.2 or newer). Both GUI and
+launcher require a safe, hash-matching review in ~/.config/wpe-gallery/whitelist.json.
+This module supplies no whitelist; wire private reviews separately. Missing or
+changed reviews fail closed. On a rejected requested assignment, the launcher
+revalidates the corresponding last-safe assignment before falling back, logging
+the reason. If no output verifies, no renderer starts.

@@ -1,5 +1,4 @@
 binds {
     Mod+Alt+H repeat=false hotkey-overlay-title="Headphone EQ / Off" { spawn "audio-eq" "toggle-headphones"; }
     Mod+Alt+S repeat=false hotkey-overlay-title="Speaker EQ / Off" { spawn "audio-eq" "toggle-speakers"; }
-    Mod+Alt+M repeat=false hotkey-overlay-title="Mic effects / Off" { spawn "audio-eq" "mic" "toggle"; }
 }

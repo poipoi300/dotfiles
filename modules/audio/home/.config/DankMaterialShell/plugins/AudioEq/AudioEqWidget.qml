@@ -43,40 +43,46 @@ PluginComponent {
             }
         }
     }
-    component Segment: Rectangle {
+    // PluginComponent supplies the same BasePill as Clock, Media and Weather.
+    // Segments add only native text and interaction layers, never another box.
+    component Segment: Item {
+        id: segment
         objectName: "audioEq-" + value
         required property string label
         required property string value
         required property string action
-        width: 32
-        height: 26
-        radius: 5
-        color: root.selected === value ? Theme.primary : Theme.surfaceContainerHigh
+        readonly property bool active: root.selected === value
+        implicitWidth: caption.implicitWidth + Theme.spacingM * 2
+        implicitHeight: root.widgetThickness
+        width: implicitWidth
+        height: implicitHeight
+
         StyledText {
+            id: caption
             anchors.centerIn: parent
-            text: parent.label
-            color: root.selected === parent.value ? Theme.primaryText : Theme.surfaceText
-            font.pixelSize: Theme.fontSizeSmall
+            text: segment.label
+            color: segment.active ? Theme.primary : Theme.widgetTextColor
+            font.pixelSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
+            font.weight: segment.active ? Font.DemiBold : Font.Normal
         }
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.select(parent.action)
+        StateLayer {
+            stateColor: Theme.widgetTextColor
+            cornerRadius: Theme.cornerRadius
+            tooltipText: (segment.value === "headphones" ? "Headphones" : "Speakers") + (segment.active ? " EQ · click to turn off" : " EQ")
+            onClicked: root.select(segment.action)
         }
     }
     horizontalBarPill: Component {
         Row {
-            spacing: 2
+            spacing: Theme.spacingXS
             Segment { label: "H"; value: "headphones"; action: "toggle-headphones" }
-            Segment { label: "off"; value: "off"; action: "off" }
             Segment { label: "S"; value: "speakers"; action: "toggle-speakers" }
         }
     }
     verticalBarPill: Component {
         Column {
-            spacing: 2
+            spacing: Theme.spacingXS
             Segment { label: "H"; value: "headphones"; action: "toggle-headphones" }
-            Segment { label: "off"; value: "off"; action: "off" }
             Segment { label: "S"; value: "speakers"; action: "toggle-speakers" }
         }
     }

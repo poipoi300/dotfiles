@@ -1,0 +1,10 @@
+description = "Local AI apps: ComfyUI, text-generation-webui, SillyTavern (user units, off by default) and StabilityMatrix settings"
+category    = "ai"
+requires    = ["dev", "ai"]   # dev: node, npm, uv; ai: CUDA and the stabilitymatrix package
+
+[packages]
+pacman = ["git", "curl", "xdg-utils"]
+
+[units]
+# Installed but not enabled: start them on demand (start-tavern, systemctl --user start comfyui).
+user = []

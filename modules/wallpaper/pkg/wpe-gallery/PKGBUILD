@@ -1,6 +1,6 @@
 # Maintainer: wpe-gallery contributors
 pkgname=wpe-gallery
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Native GPUI gallery for installed Wallpaper Engine wallpapers'
 arch=('x86_64' 'aarch64')
@@ -9,10 +9,9 @@ license=('MIT')
 depends=('linux-wallpaperengine' 'wayland' 'libxkbcommon' 'libx11' 'libxcb'
          'libxrandr' 'libxi' 'libxcursor' 'fontconfig' 'freetype2'
          'vulkan-icd-loader' 'gcc-libs' 'glibc')
-makedepends=('git' 'rust' 'clang' 'cmake' 'pkgconf')
-optdepends=('niri: fallback output detection' 'noto-fonts-cjk: CJK wallpaper titles'
-            'python: optional standalone renderer integration')
-_commit='9e86363a2778bd0ea0586a7253f9d6adfee32a57'
+makedepends=('git' 'rust' 'clang' 'cmake' 'pkgconf' 'python')
+optdepends=('niri: fallback output detection' 'noto-fonts-cjk: CJK wallpaper titles')
+_commit='a5c5525dfbbbc5f9acfa06aedb7e29c50df29cc3'
 source=("$pkgname::git+https://github.com/poipoi300/wpe-gallery.git#commit=$_commit")
 sha256sums=('SKIP')
 
@@ -24,11 +23,13 @@ build() {
 check() {
     cd "$srcdir/$pkgname"
     cargo test --locked
+    WPE_GALLERY_BINARY="${CARGO_TARGET_DIR:-target}/release/wpe-gallery" python3 tests/hash_compatibility.py
 }
 
 package() {
     cd "$srcdir/$pkgname"
     install -Dm755 "${CARGO_TARGET_DIR:-target}/release/wpe-gallery" "$pkgdir/usr/bin/wpe-gallery"
+    install -Dm755 "${CARGO_TARGET_DIR:-target}/release/wpe-gallery-launch" "$pkgdir/usr/bin/wpe-gallery-launch"
     install -Dm644 assets/io.github.poipoi300.wpe-gallery.desktop "$pkgdir/usr/share/applications/io.github.poipoi300.wpe-gallery.desktop"
     install -Dm644 assets/io.github.poipoi300.wpe-gallery.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.poipoi300.wpe-gallery.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

@@ -1,0 +1,19 @@
+[Unit]
+Description=ComfyUI (127.0.0.1:8188)
+# Created by `llm-setup comfyui`; the private llm-private module supplies the model paths.
+ConditionPathExists=%h/src/ComfyUI/.venv/bin/python
+ConditionPathExists=%h/.config/comfyui/extra_model_paths.yaml
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/ComfyUI
+Environment=PYTHONNOUSERSITE=1 HF_HOME=%h/.cache/huggingface
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/comfyui/custom_nodes %h/.local/share/comfyui/models %h/.local/share/comfyui/input %h/.local/share/comfyui/output %h/.local/share/comfyui/temp %h/.local/share/comfyui/user
+ExecStart=%h/src/ComfyUI/.venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch --base-directory %h/.local/share/comfyui --extra-model-paths-config %h/.config/comfyui/extra_model_paths.yaml
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

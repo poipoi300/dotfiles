@@ -2,16 +2,16 @@
 
 PipeWire / WirePlumber with EasyEffects 8.3.2. The SMSL DAC is one stereo sink;
 headphones versus the speaker amplifier is selected physically with the IR remote.
-The two EQ presets remain independent. The Revelator is the microphone interface.
+Headphones and Speakers are separate presets. The Revelator microphone always
+uses Mic, independently of output selection.
 
 ## Installation and controls
 
-Apply this module through the normal arcus workflow. It declares the required
-packages and enables `easyeffects.service` for `graphical-session.target`.
-No package-provided user unit existed in the inspected EasyEffects package.
-The unit uses `--gapplication-service` (supported but deprecated in 8.3.2), hides
-the window, and restores the saved rocker and microphone state after startup.
-Do not also enable EasyEffects' desktop autostart.
+Apply this module through the normal arcus workflow. It declares packages and
+enables `easyeffects.service` for `graphical-session.target`. The package did not
+ship a user unit when inspected. The unit starts EasyEffects hidden with
+`--gapplication-service`, runs `audio-eq-prepare` first, then `audio-eq restore`.
+Do not also enable EasyEffects desktop autostart.
 
 Add this to the main niri configuration yourself:
 
@@ -19,9 +19,9 @@ Add this to the main niri configuration yourself:
 include "audio-binds.kdl"
 ```
 
-The snippet provides Mod+Alt+H (Headphones/Off), Mod+Alt+S (Speakers/Off), and
-Mod+Alt+M (Mic on/off). These combinations were absent from the inspected DMS
-binds. The module does not modify the main niri configuration or DMS binds.
+Mod+Alt+H toggles Headphones/Off; Mod+Alt+S toggles Speakers/Off. These keys do
+not conflict with the inspected DMS binds. The former Mod+Alt+M mic toggle is
+removed. The module does not modify the main niri configuration or DMS binds.
 
 ```sh
 audio-eq headphones
@@ -29,55 +29,61 @@ audio-eq speakers
 audio-eq off
 audio-eq toggle-headphones
 audio-eq toggle-speakers
-audio-eq mic on
-audio-eq mic off
-audio-eq mic toggle
 audio-eq status
+audio-eq mic  # Debug reload of Mic; cannot turn it off.
 ```
 
-`status` prints JSON such as `{"output":"headphones","mic":"on"}`.
-State is stored atomically at `$XDG_STATE_HOME/audio-eq/state`, defaulting to
-`~/.local/state/audio-eq/state`; concurrent commands are serialized with flock.
-First use starts with both chains Off. Pressing an already selected output
-option returns to Off. Notifications show both resulting states.
+State lives at `$XDG_STATE_HOME/audio-eq/state` (default
+`~/.local/state/audio-eq/state`), is written atomically, and commands use flock.
+Status prints JSON such as `{"output":"headphones","mic":"on"}`. Old saved
+mic-Off states migrate to the always-on policy. Startup restores only the output
+choice; input is always loaded with Mic. There is no supported mic-Off command.
+Every output change ensures Mic is loaded and global bypass is disabled.
 
-Off loads an empty output pipeline (`Output Off`). Mic Off loads an empty input
-pipeline (`Mic Off`). This bypasses all effects in that chain, keeping the other
-chain independent. EasyEffects' CLI bypass is global, so the script disables
-that global bypass after applying its chain-specific setting. These commands own
-both chains: use them for changes, rather than editing the active chain or
-switching global bypass in the GUI. Status describes the saved controller state,
-not arbitrary changes made outside the controller.
+Off loads the empty **Output Off** preset, bypassing the output chain only.
+EasyEffects global bypass affects input too, so output-Off never enables it.
+Use this controller instead of changing the chains or global bypass in the GUI;
+status describes controller state rather than arbitrary external GUI edits.
 
-In DMS Settings → Plugins, enable **Audio EQ Rocker**, then add its widget to the
-bar's desired section. The plugin is discovered under
-`~/.config/DankMaterialShell/plugins/AudioEq/`. It supports horizontal and
-vertical bars, reads `audio-eq status` at startup and after state-file changes,
-and uses FileView watching instead of polling. Installing the plugin does not
-rewrite existing bar settings. H and S toggle their preset; off selects Off.
-Physical routing still requires the IR remote.
+Enable **Audio EQ Rocker** in DMS Settings → Plugins and add it to the bar. The
+plugin lives under `~/.config/DankMaterialShell/plugins/AudioEq/`. It shows only
+H and S inside the same native `BasePill` used by the stock clock/media/weather
+widgets. An active option has the theme's primary text colour; neither is
+highlighted when output is Off. Clicking the active option turns output effects
+off; clicking the other switches presets. There is no middle or mic segment.
+`StyledText`, `StateLayer`, bar text sizing, Theme colours, spacing and corner
+radius provide native hover/pressed/ripple behaviour without separate segment
+background boxes. Horizontal and vertical bars are supported.
+
+FileView watches the state file; the plugin reads `audio-eq status` at startup
+and after changes, with no polling timer. Physical routing still requires the
+IR remote. Reload DMS after updating the plugin; the implementation does not
+restart the live DMS service. The startup/autoload changes take effect on the
+next EasyEffects service start; `audio-eq mic` can explicitly reload Mic.
 
 ## Paths, routing, and autoload
 
-EasyEffects **8.3.2** stores presets under `$XDG_DATA_HOME/easyeffects/output/`
-and `input/` (normally `~/.local/share/easyeffects/`), not the older
-`~/.config/easyeffects/` paths. Verified against the matching source tag's
-`presets_directory_manager.cpp`, preset serializers, and a running instance.
-Use `easyeffects -l Headphones` to load: `-p` lists presets in this version.
+EasyEffects **8.3.2** uses `$XDG_DATA_HOME/easyeffects/output/` and `input/`
+(normally `~/.local/share/easyeffects/`), not the older config paths. This was
+verified against its matching source tag and a running instance. Use `-l` to
+load a preset; `-p` lists presets in this version.
 
-`audio-eq-prepare` runs before the daemon, pins output to
-`alsa_output.usb-SMSL_SMSL_USB_AUDIO-00.analog-stereo`, and discovers exactly one
-Revelator input by its stable model prefix using pactl. It writes the actual
-serial-bearing source name only into the local runtime configuration
-`~/.config/easyeffects/db/easyeffectsrc`. No serials or endpoint GUIDs are shipped
-in this public module. Startup fails clearly if there is not exactly one
-Revelator source; connect it before starting the service. It never changes the
-WirePlumber default sink/source.
+`audio-eq-prepare` pins output to
+`alsa_output.usb-SMSL_SMSL_USB_AUDIO-00.analog-stereo` and discovers exactly one
+Revelator input by its model prefix. Its actual serial-bearing node name is
+written only into the local `~/.config/easyeffects/db/easyeffectsrc` and locally
+generated `$XDG_DATA_HOME/easyeffects/autoload/input/` JSON files. Public module
+files contain no serials, usernames, endpoint GUIDs or absolute home paths.
+Connect the Revelator before service startup; discovery fails clearly otherwise.
+The helper never changes WirePlumber's default sink/source.
 
-Device → preset autoload is deliberately unused: the shared DAC cannot identify
-which physical output the IR remote selected, and autoload on reconnect would
-override the user's Off choice. Service startup instead restores both saved
-selections. No legacy VST DLLs or Windows executable code are copied or run.
+Mic autoload entries map the Revelator's route **descriptions** (as expected by
+EasyEffects, not PulseAudio port names) to Mic, including the empty route.
+An input fallback to Mic also handles a newly exposed route. Input automatic
+processing is explicitly enabled, global bypass is disabled, and ExecStartPost
+loads Mic regardless of the saved rocker state. Output device autoload remains
+unused: one DAC cannot identify the IR remote's physical selection, and output
+autoload would override the user's Off choice.
 
 ## APO → EasyEffects conversion
 
@@ -152,34 +158,29 @@ Voicemeeter bus, and its ReaJS chunk describes a 1140 ms delay that would be
 inappropriate to add to the mic path. Tune the Mic preset with real speech after
 installation; these settings have not been perceptually validated.
 
-## Verification and restoration
+## Verification
 
-- Presets loaded with EasyEffects 8.3.2; last-loaded input/output names confirmed
-  using `-a` / `-s`. Persisted EQ mode, Q, frequency, gain, compressor and gate
-  settings were inspected. A clamped limiter release setting was corrected to
-  the supported 20 ms maximum.
-- Final tests used a separate EasyEffects instance with independent XDG
-  directories, a temporary `agent-test` null sink and its monitor source.
-  Automatic processing/moving of existing desktop streams was disabled in that
-  instance. All eight output/mic transitions passed, including output Off while
-  Mic stayed On. Notifications were captured by a test stub.
-- GUI tested using installed DMS components under **headless sway**, with QtTest
-  clicks on actual plugin segments: H → Off → S → Off. FileView updates passed;
-  no polling timer exists in the plugin. The isolated harness emitted unrelated
-  stock theme-generation warnings; plugin loading and interactions passed.
-- The service started and restarted successfully in the earlier authorized live
-  audio test; later tests complied with the updated virtual-device-only rule.
-  Earlier nested niri testing also preceded the headless-only correction.
-  EasyEffects emitted an upstream hidden-window QML `height of null` warning;
-  no preset-load or missing-plugin errors were observed.
-- niri snippet and systemd unit validation passed. Headless sway and all test
-  EasyEffects processes were stopped; null-sink module unloaded. Temporary live
-  deployment files were removed and original SMSL/Revelator defaults verified.
-  The live DMS service and main niri configuration were never modified.
-- `lsp-plugins-lv2` was installed before the user's later no-package-install
-  instruction. No other packages were installed. It remains installed.
-- No arcus run and no commit. Activation and actual hardware listening tests are
-  left to installation. In T3's shell, notify-send initially inherited an
-  incompatible AppImage libnotify through LD_LIBRARY_PATH; it worked when that
-  variable was removed for the test. Normal desktop invocation does not need
-  that test-environment workaround.
+Follow-up tests used a separate EasyEffects instance, isolated XDG directories,
+a temporary null sink and a remapped virtual source. Test configuration disabled
+automatic movement of desktop streams and replaced the SMSL destination with the
+virtual sink before starting the test instance. The production routing helper
+was exercised against that virtual Revelator fixture; no real audio device was
+used or reconfigured.
+
+- Exact device/empty-route autoload selected Mic with the fallback disabled.
+- Restore migrated an old saved mic-Off state and linked gate → compressor →
+  limiter on the virtual source.
+- Actual global bypass removed the gate from the virtual signal path. Output
+  Off instead left all three mic effects linked and global bypass disabled.
+- H → Off and S → Off CLI transitions preserved Mic and its input graph.
+  `audio-eq mic` reloaded Mic; `audio-eq mic off` was rejected.
+- Headless sway and QtTest exercised the actual DMS plugin: Off → H → Off → S
+  → H, with file-watch updates, no visible Off segment, and no mic control.
+  A separate clean screenshot placed the plugin beside the stock DMS Clock.
+- Shell syntax, niri snippet, JSON, privacy checks, and diff whitespace checked.
+- Test processes stopped and virtual modules unloaded. Original default devices
+  and the original running EasyEffects process were verified unchanged. No live
+  DMS restart, package installation, arcus run, or commit occurred in this follow-up.
+
+The Mic settings remain a functional approximation requiring speech calibration;
+the conversion limitations above still apply.

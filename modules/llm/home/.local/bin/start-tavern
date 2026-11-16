@@ -1,0 +1,37 @@
+#!/bin/sh
+# Start text-generation-webui and SillyTavern (replaces the Windows "Start With Tavern" .bat).
+# Restarting the user units kills leftover processes of the previous run (KillMode=control-group)
+# and starts fresh ones. Opens SillyTavern in the default browser once it answers.
+#   start-tavern            restart both and open the browser
+#   start-tavern --no-open  restart both only
+set -eu
+
+PORT=8000                       # keep in step with sillytavern.service
+URL=http://127.0.0.1:$PORT/
+WAIT=${START_TAVERN_WAIT:-180}  # seconds to wait for SillyTavern (first start compiles the frontend)
+
+open_browser=1
+[ "${1:-}" = "--no-open" ] && open_browser=0
+
+systemctl --user restart textgen.service sillytavern.service
+
+# Units whose files or data are missing idle (ConditionPath*) instead of failing: report that.
+for u in textgen sillytavern; do
+    if ! systemctl --user is-active --quiet "$u.service"; then
+        echo "start-tavern: $u.service is not running (see: systemctl --user status $u.service)" >&2
+    fi
+done
+
+i=0
+until curl -fsS -o /dev/null --max-time 2 "$URL" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge "$WAIT" ]; then
+        echo "start-tavern: SillyTavern did not answer on $URL within ${WAIT}s (journalctl --user -u sillytavern)" >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+if [ "$open_browser" -eq 1 ]; then
+    xdg-open "$URL" >/dev/null 2>&1 &
+fi

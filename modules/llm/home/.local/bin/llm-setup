@@ -1,0 +1,125 @@
+#!/bin/sh
+# Build and maintain the local AI apps. Everything lives on ext4 under $HOME; the old Windows
+# install on the read-only data drive is only ever read, and only data is copied from it
+# (never executables, venvs, extension or plugin code, secrets).
+#
+#   llm-setup comfyui              clone ComfyUI at COMFYUI_TAG, venv, PyTorch, requirements
+#   llm-setup textgen              venv for ~/src/textgen (upstream Linux/CUDA requirements)
+#   llm-setup sillytavern          npm ci for ~/src/SillyTavern-local
+#   llm-setup stabilitymatrix      point StabilityMatrix at a data dir on ext4 and the shared model store
+#   llm-setup models-overlay       symlink the read-only LLM store into a writable model dir
+#   llm-setup import-sillytavern OLD_ROOT   copy user data from an old SillyTavern install
+#   llm-setup import-comfyui OLD_ROOT       copy workflows and UI settings from an old ComfyUI
+#   llm-setup import-textgen OLD_ROOT       copy chat logs and user_data from an old textgen
+#   llm-setup check                import torch in each venv and report CUDA and capability
+set -eu
+
+COMFYUI_TAG=${COMFYUI_TAG:-v0.45.0}
+PY=${LLM_PYTHON:-3.13}      # ComfyUI recommends 3.13; the textgen wheels (exllamav3, flash-attn) are cp313
+SRC=$HOME/src
+SM_LIB=$HOME/.local/share/StabilityMatrix
+SM_CONF=$HOME/.config/StabilityMatrix
+ST_DATA=$HOME/.local/share/SillyTavern
+CUI_DATA=$HOME/.local/share/comfyui
+TG_OVERLAY=$HOME/.local/share/textgen/models
+PATHS_ENV=${LLM_PATHS_ENV:-$HOME/.config/llm/paths.env}
+
+die() { echo "llm-setup: $*" >&2; exit 1; }
+need_old() { [ -n "${1:-}" ] && [ -d "$1" ] || die "usage: llm-setup $cmd OLD_ROOT"; }
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+
+case "$cmd" in
+comfyui)
+    [ -d "$SRC/ComfyUI/.git" ] || git clone https://github.com/Comfy-Org/ComfyUI.git "$SRC/ComfyUI"
+    cd "$SRC/ComfyUI"
+    git fetch --tags -q
+    git checkout -q "$COMFYUI_TAG"
+    uv venv --python "$PY" .venv
+    # PyPI's Linux torch wheels are the CUDA 13.2 builds (include sm_120). The pytorch.org cu134
+    # index has torch but no matching torchvision, so PyPI is the consistent set.
+    uv pip install --python .venv/bin/python torch torchvision
+    uv pip install --python .venv/bin/python -r requirements.txt
+    ;;
+textgen)
+    cd "$SRC/textgen"
+    uv venv --python "$PY" .venv
+    # upstream one_click.py: torch 2.9.0 (CUDA 12.8 build) + requirements/full; the pinned wheels
+    # (exllamav3, flash-attn, llama.cpp binaries) come from the URLs in that file.
+    uv pip install --python .venv/bin/python torch==2.9.0
+    uv pip install --python .venv/bin/python -r requirements/full/requirements.txt
+    ;;
+sillytavern)
+    cd "$SRC/SillyTavern-local"
+    NODE_ENV=production npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+    ;;
+stabilitymatrix)
+    [ -r "$PATHS_ENV" ] || die "missing $PATHS_ENV (SD_MODELS_DIR=...)"
+    . "$PATHS_ENV"
+    [ -n "${SD_MODELS_DIR:-}" ] || die "SD_MODELS_DIR not set in $PATHS_ENV"
+    # Non-portable mode: library.json in ~/.config/StabilityMatrix names the data directory and
+    # <data>/settings.json carries the shared-models override. The EULA stays for the user to accept.
+    mkdir -p "$SM_CONF" "$SM_LIB"
+    [ -e "$SM_CONF/library.json" ] || printf '{"LibraryPath": "%s"}\n' "$SM_LIB" > "$SM_CONF/library.json"
+    [ -e "$SM_LIB/settings.json" ] || printf '{"Version": 1, "ModelDirectoryOverride": "%s"}\n' "$SD_MODELS_DIR" > "$SM_LIB/settings.json"
+    ;;
+models-overlay)
+    [ -r "$PATHS_ENV" ] || die "missing $PATHS_ENV (LLM_MODELS_SRC=...)"
+    . "$PATHS_ENV"
+    [ -d "${LLM_MODELS_SRC:-}" ] || die "LLM_MODELS_SRC is not a directory (drive not mounted?)"
+    mkdir -p "$TG_OVERLAY"
+    # drop links whose target vanished, then (re)link every entry of the store
+    find "$TG_OVERLAY" -maxdepth 1 -type l ! -exec test -e {} \; -delete
+    for e in "$LLM_MODELS_SRC"/* "$LLM_MODELS_SRC"/.[!.]*; do
+        [ -e "$e" ] || continue
+        n=${e##*/}
+        case "$n" in
+        config-user.yaml)   # per-model settings the UI saves: a private writable copy
+            [ -e "$TG_OVERLAY/$n" ] || cp "$e" "$TG_OVERLAY/$n" ;;
+        *) ln -sfn "$e" "$TG_OVERLAY/$n" ;;
+        esac
+    done
+    ;;
+import-sillytavern)
+    need_old "$@"; old=$1/data/default-user
+    [ -d "$old" ] || die "no $old"
+    dst=$ST_DATA/data/default-user
+    mkdir -p "$dst"
+    # skipped: secrets.json (API keys), mcp_settings.json (Windows commands), extensions/
+    # (third-party code), thumbnails (regenerated), logs and numbered settings backups
+    (cd "$old" && tar -cf - --exclude=./extensions --exclude=./thumbnails --exclude=./secrets.json \
+        --exclude=./mcp_settings.json --exclude=./content.log --exclude='./settings.json.[0-9]*' \
+        --exclude='./stats.json.[0-9]*' .) | tar -xf - --no-same-owner --no-same-permissions -C "$dst"
+    mkdir -p "$dst/extensions"
+    chmod -R u+rwX,go-rwx "$ST_DATA"
+    # the old server was reached over the LAN; everything runs on this machine now
+    sed -i 's#192\.168\.[0-9]*\.[0-9]*#127.0.0.1#g' "$dst/settings.json"
+    ;;
+import-comfyui)
+    need_old "$@"; old=$1/user/default
+    [ -d "$old" ] || die "no $old"
+    mkdir -p "$CUI_DATA/user/default"
+    cp -rn --no-preserve=mode,ownership "$old/workflows" "$CUI_DATA/user/default/"
+    cp -n --no-preserve=mode,ownership "$old/comfy.settings.json" "$CUI_DATA/user/default/"
+    ;;
+import-textgen)
+    need_old "$@"; old=$1/user_data
+    [ -d "$old" ] || die "no $old"
+    dst=$SRC/textgen/user_data
+    # presets, characters, instruction templates, grammars and tools are identical to the
+    # fork's tracked defaults; only chat logs and the user profile are personal
+    for d in logs; do [ -d "$old/$d" ] && cp -rn --no-preserve=mode,ownership "$old/$d" "$dst/"; done
+    [ -e "$dst/users/Default.yaml" ] || { mkdir -p "$dst/users"; cp --no-preserve=mode,ownership "$old/users/Default.yaml" "$dst/users/"; }
+    ;;
+check)
+    for v in "$SRC/ComfyUI" "$SRC/textgen"; do
+        echo "== $v"
+        "$v/.venv/bin/python" -I -c '
+import torch
+print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print(torch.cuda.get_device_name(0), "capability", torch.cuda.get_device_capability(0), "arches", torch.cuda.get_arch_list())'
+    done
+    ;;
+*) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
