@@ -79,10 +79,18 @@ or secrets, include a security review.
 
 Nothing an agent tests may appear on the user's screens or play through their speakers. Never open
 test windows in the live session, restart their shell/bar/dock services, or drive their pointer.
-Run the app under a compositor instance of your own, export its `WAYLAND_DISPLAY` (and
-`NIRI_SOCKET` when relevant) only to the processes under test, and tear it down afterwards:
+Run the app under a compositor instance of your own, in a private runtime dir so the user's
+sockets are unreachable even by mistake, and tear it down afterwards:
 
-- Default: headless sway. Start it with `WAYLAND_DISPLAY=` unset and
+- Isolate first: `export XDG_RUNTIME_DIR=$(mktemp -d); chmod 700 "$XDG_RUNTIME_DIR"; unset
+  WAYLAND_DISPLAY DISPLAY NIRI_SOCKET`. Then start the compositor, read the socket name it creates
+  in that dir, and set `WAYLAND_DISPLAY` (and `DISPLAY` from its Xwayland for X11/Avalonia/Electron
+  apps; enable `xwayland` in the test config) explicitly for the app. Toolkits fall back to any
+  socket they can find, so an inherited or missing variable puts the window on the user's screen.
+- Verify before screenshots: `tr '\0' '\n' < /proc/<pid>/environ` shows your runtime dir and
+  sockets. If you can't verify, don't launch the GUI; test config and files instead.
+
+- Default: headless sway:
   `WLR_BACKENDS=headless WLR_RENDERER=gles2 sway -c <scratch config>` (`pixman` without a GPU
   path); set outputs in that config (`output HEADLESS-1 mode 1920x1080`) or with `swaymsg`;
   capture with `grim`. Supports layer-shell, so it fits bars, docks and wallpapers.
