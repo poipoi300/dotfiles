@@ -24,6 +24,12 @@ An evaluation can provide critique without a pass target; do not invent one.
 When a verdict is needed, fix the acceptance threshold, mandatory constraints,
 and aggregation rule before collecting reviews. Keep these stable across rounds.
 
+When the user asks for a council review of code, the caller first fixes known
+issues, addresses open PR comments, and runs the relevant checks, so reviewers
+judge the current implementation rather than defects already known. Skip fixes
+to code the user wants replaced. Inside Hillclimb, such a fix is a new
+candidate and counts as a round.
+
 For code and feature reviews, include the intended behavior, diff and surrounding
 code, relevant contracts, and available check results. Assign coverage for
 correctness, integration and regressions, and maintainability; include security
@@ -63,6 +69,11 @@ boundary to assess, not a score to aim to produce.
 Pass each reviewer its remaining time and allocated quota. Stop or cancel
 outstanding reviews when the caller's limit or cancellation applies.
 
+Do not wait idle. Check each review against the artifact as it arrives and
+decide what to act on while the others run. Do not change the candidate until
+every review has completed. Council sets each reviewer's output contract; the
+`reviewer` role's default report format does not apply.
+
 Ask each reviewer for criterion-level judgments and requested scores; concrete
 evidence or locations; important strengths, defects, and uncertainties; whether
 the target is met; and the highest-impact improvements. Reviewers should identify
@@ -78,7 +89,10 @@ Review findings are advisory. The code owner or builder decides which findings
 are true, relevant, and worth acting on, and may accept, defer, or reject them
 based on its own inspection and judgment. Reviewer agreement does not make a
 suggestion binding. Briefly explain material rejections or deferrals, such as an
-incorrect premise, an out-of-scope concern, or an unfavorable tradeoff. Rejecting
+incorrect premise, an out-of-scope concern, or an unfavorable tradeoff. Guard
+the scope: repeated rounds tend to grow the change one cheap-looking suggestion
+at a time. Decline extra tests, rare-case guards, added compatibility, and small
+performance work the goal does not need, and list them as follow-ups. Rejecting
 advice does not erase a confirmed required-check failure, change the agreed
 acceptance criteria, or rewrite the Council's recorded judgments.
 
