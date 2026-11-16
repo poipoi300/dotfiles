@@ -1,0 +1,12 @@
+[Unit]
+ConditionPathExists=%h/.config/cli-proxy-api/helpers.env
+Description=Refresh CLIProxyAPI model pins and Zed aliases
+After=cli-proxy-api.service
+Wants=cli-proxy-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/src/scripts
+EnvironmentFile=-%h/.config/cli-proxy-api/helpers.env
+UMask=0077
+ExecStart=/usr/bin/uv run --script %h/src/scripts/bin/update_model_pins.py

@@ -1,0 +1,19 @@
+[Unit]
+ConditionPathExists=%h/.config/cli-proxy-api/helpers.env
+Description=Loopback local-qwen compaction shim
+After=cli-proxy-api.service
+Wants=cli-proxy-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/src/scripts
+EnvironmentFile=-%h/.config/cli-proxy-api/helpers.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=/usr/bin/uv run --script %h/src/scripts/bin/compaction_shim.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

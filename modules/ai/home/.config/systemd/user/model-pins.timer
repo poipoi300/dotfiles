@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh CLIProxyAPI pins daily at 08:13
+
+[Timer]
+OnCalendar=*-*-* 08:13:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

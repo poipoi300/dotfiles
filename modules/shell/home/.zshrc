@@ -38,3 +38,6 @@ eval "$(starship init zsh)"
 # Plugins last (syntax highlighting must be the final one).
 source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Private helpers (gpt-claude model-alias functions) when the private scripts repo is cloned.
+[[ -r ~/src/scripts/shell/gpt-claude.zsh ]] && source ~/src/scripts/shell/gpt-claude.zsh

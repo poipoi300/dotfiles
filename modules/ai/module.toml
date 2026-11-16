@@ -7,4 +7,4 @@ aur    = ["stabilitymatrix"]   # rife-ncnn-vulkan (2022) no longer builds agains
 local  = ["cli-proxy-api", "grok-build", "antigravity-cli"]
 
 [units]
-user = ["cli-proxy-api.service", "model-pins.timer", "compaction-shim.service"]   # stays inactive until ~/.config/cli-proxy-api/config.yaml exists
+user = ["cli-proxy-api.service", "model-pins.timer", "compaction-shim.service"]   # configure proxy and helper credentials before enabling
