@@ -6,6 +6,6 @@ local  = ["pear-desktop-poipoi", "haruneko", "svp", "python-mozjpeg-lossless-opt
 pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager",
           "ark", "mpv", "bitwarden", "qbittorrent", "okular", "libreoffice-fresh", "blender",
           "obs-studio", "audacity", "handbrake", "ffmpeg", "vapoursynth", "satty", "grim",
-          "slurp", "displaycal", "argyllcms"]
-aur    = ["obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
+          "slurp", "displaycal", "argyllcms", "unrar", "python-chardet"]
+aur    = ["mcomix", "obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
           "solidcraft"]
