@@ -8,4 +8,4 @@ aur    = ["yay"]
 
 [units]
 system = ["fstrim.timer", "systemd-timesyncd.service"]
-user   = ["ssh-agent.service"]
+user   = ["ssh-agent.socket"]   # socket-activated; the service has no [Install]
