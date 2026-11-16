@@ -1,0 +1,13 @@
+#!/bin/sh
+# Blender MCP server, run from a persistent uv tool install. Running it with
+# `uvx` kept a uv process per client holding the uv cache lock, which blocked
+# `uv cache prune`. Installs the pinned version on first use.
+set -eu
+version=2.2.6
+bin="${XDG_BIN_HOME:-$HOME/.local/bin}/mcp-for-blender"
+want="mcp-for-blender v$version"
+if ! uv tool list 2>/dev/null | grep -qx "$want"; then
+    uv tool install --quiet --force --python 3.11 "mcp-for-blender==$version" >&2
+fi
+export DISABLE_TELEMETRY=true
+exec "$bin" "$@"
