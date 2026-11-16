@@ -1,0 +1,50 @@
+# xAI/SpaceXAI "Grok Bot" desktop agent (Electron), repackaged from the vendor's official .deb.
+# x.ai/bot only links the macOS build, but Cursor/Anysphere publish Linux builds in their signed apt
+# repository (registered by the .deb's own postinst): https://downloads.cursor.com/aptrepo, suite
+# "grok-bot". Its InRelease is signed by Anysphere Inc <security@anysphere.co>, fingerprint
+# 380F F4BC DC34 A4BD 92A3 5653 42A1 772E 62E4 92D6 (the key embedded in the .deb postinst); the
+# sha256 below is the one listed in that signed Packages index.
+# Bump: fetch dists/grok-bot/InRelease, verify it with that key, check the sha256 of
+# main/binary-amd64/Packages against InRelease, then take Version/Filename/SHA256 from Packages.
+# The postinst's apt-source, AppArmor and update-alternatives steps don't apply on Arch. This host
+# allows unprivileged user namespaces, so chrome-sandbox stays non-SUID (0755). Installed to
+# /opt/grok-bot instead of "/opt/Grok Bot": Electron's SUID sandbox fallback breaks on paths with
+# spaces (electron/electron#44414). The .deb build doesn't self-update.
+pkgname=grok-bot
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Grok Bot, xAI's desktop agent (official Linux build)"
+arch=(x86_64)
+url="https://x.ai/bot"
+license=(LicenseRef-proprietary)
+depends=(gtk3 libnotify nss libxss libxtst xdg-utils at-spi2-core util-linux-libs libsecret
+         alsa-lib mesa libxkbcommon libdrm)
+optdepends=('libappindicator-gtk3: tray icon')
+options=(!strip !debug)
+source=("$pkgname-$pkgver-amd64.deb::https://downloads.cursor.com/aptrepo/pool/grok-bot/g/gr/grok-bot_${pkgver}_amd64.deb")
+noextract=("$pkgname-$pkgver-amd64.deb")
+sha256sums=('5b02fb215103eded94ec9f381a790d71f6727f017681c7edd1b56f2b8cfa572d')
+
+prepare() {
+  rm -rf deb
+  mkdir deb
+  bsdtar -xOf "$pkgname-$pkgver-amd64.deb" data.tar.xz | bsdtar -xf - -C deb
+}
+
+package() {
+  install -d "$pkgdir/opt"
+  cp -a "deb/opt/Grok Bot" "$pkgdir/opt/$pkgname"
+  chmod 0755 "$pkgdir/opt/$pkgname/chrome-sandbox"
+  rm -f "$pkgdir/opt/$pkgname/resources/apparmor-profile"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$pkgname/grok-bot" "$pkgdir/usr/bin/grok-bot"
+
+  install -Dm644 deb/usr/share/applications/grok-bot.desktop \
+    "$pkgdir/usr/share/applications/grok-bot.desktop"
+  cp -a deb/usr/share/icons "$pkgdir/usr/share/icons"
+  install -Dm644 "deb/opt/Grok Bot/LICENSE.electron.txt" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE.electron.txt"
+  install -Dm644 "deb/opt/Grok Bot/LICENSES.chromium.html" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
+}

@@ -4,7 +4,7 @@ category    = "ai"
 [packages]
 pacman = ["ollama-cuda", "cuda", "cudnn"]
 aur    = ["stabilitymatrix"]   # rife-ncnn-vulkan (2022) no longer builds against current glslang
-local  = ["cli-proxy-api", "grok-build", "antigravity-cli"]
+local  = ["cli-proxy-api", "grok-build", "grok-bot", "antigravity-cli"]
 
 [units]
 user = ["cli-proxy-api.service", "model-pins.timer", "compaction-shim.service"]   # configure proxy and helper credentials before enabling
