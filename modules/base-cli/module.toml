@@ -1,9 +1,13 @@
-description = "Base command-line system: build tools, git, editors, monitors, AUR helper"
+description = "Base command-line system: build tools, git, editors, monitors, firmware updates, rebuild checks, AUR helper"
 category    = "base"
 
 [packages]
 pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7zip", "micro",
-          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh", "pacman-contrib"]
+          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh", "pacman-contrib",
+          "rebuild-detector",   # after each transaction, lists AUR and local builds linked against a library that is gone
+          "fwupd",              # firmware from LVFS: fwupdmgr refresh, then fwupdmgr update
+          "fd", "dust", "tealdeer", "magic-wormhole",   # tealdeer: tldr; magic-wormhole: send a file with a short code
+          "git-delta"]          # git's pager (.gitconfig)
 aur    = ["yay"]
 
 [units]
