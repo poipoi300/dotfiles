@@ -3,21 +3,23 @@
 # midscroll-apply are left out (settings live in the module's /etc/midscroll.conf).
 pkgname=midscroll
 pkgver=1.15
-pkgrel=1
+pkgrel=3
 pkgdesc="Windows-style middle-button drag autoscroll (evdev/uinput, works on Wayland and X11)"
 arch=(any)
 url="https://github.com/gnhen/midscroll"
 license=(Unlicense)
-depends=(python python-evdev python-gobject python-cairo gtk4 gtk4-layer-shell librsvg)
+depends=(python python-evdev python-gobject python-cairo gtk4 gtk4-layer-shell)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/gnhen/midscroll/archive/refs/tags/v$pkgver.tar.gz"
-        niri-focus.patch)
+        niri.patch)
 sha256sums=('8f0133be724b231ed7443fa1184491b92b5a071e5ac0a8b3a7d97300ed96c4fa'
-            '812463873047489ba08c7e5c84044b93e68a6623aad4c89d9f1abfac6073ee35')
+            'f02b1a9dca59b7c28a288b1051a2d55bf6008c58538b67e65be64e7bc8c3a44c')
 
 prepare() {
   cd "$pkgname-$pkgver"
-  # The app blacklist reads the focused window through kdotool (KWin) or xprop; add niri IPC.
-  patch -p1 < "$srcdir/niri-focus.patch"
+  # niri support for the session helper: the focused window for the app blacklist comes from
+  # niri IPC, the pointer position from a brief pointer-enter probe, and the marks are a ring at
+  # the press point and a triangle at the hand pointing the way it scrolls.
+  patch -p1 < "$srcdir/niri.patch"
 }
 
 package() {
@@ -26,7 +28,6 @@ package() {
   install -Dm755 midscroll-overlay.py "$pkgdir/usr/bin/midscroll-overlay"
   install -Dm644 systemd/midscroll.service "$pkgdir/usr/lib/systemd/system/midscroll.service"
   install -Dm644 systemd/midscroll-overlay.service "$pkgdir/usr/lib/systemd/user/midscroll-overlay.service"
-  install -Dm644 icons/move-vertical.svg "$pkgdir/usr/share/midscroll/move-vertical.svg"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md SECURITY.md -t "$pkgdir/usr/share/doc/$pkgname"
 }

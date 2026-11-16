@@ -9,3 +9,6 @@ theme = dankcolors
 # Ctrl+C copies when text is selected, otherwise it reaches the program (interrupt).
 keybind = performable:ctrl+c=copy_to_clipboard
 keybind = ctrl+v=paste_from_clipboard
+
+# Selecting text copies nothing; middle click doesn't paste (niri has primary selection off).
+copy-on-select = false

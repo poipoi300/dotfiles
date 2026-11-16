@@ -56,6 +56,10 @@
       "general.autoScroll": {
         "Value": true,
         "Status": "default"
+      },
+      "middlemouse.paste": {
+        "Value": false,
+        "Status": "default"
       }
     }
   }

@@ -1,0 +1,278 @@
+--- a/midscroll-overlay.py	2026-11-15 23:18:25.974595732 -0500
++++ b/midscroll-overlay.py	2026-11-15 23:22:42.765492892 -0500
+@@ -30,7 +30,9 @@
+ 
+ import array
+ import ctypes.util
++import json
+ import logging
++import math
+ import os
+ import re
+ import shutil
+@@ -45,6 +47,7 @@
+ log = logging.getLogger("midscroll-overlay")
+ 
+ WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY"))
++NIRI = bool(os.environ.get("NIRI_SOCKET"))
+ 
+ if WAYLAND:
+     # gtk4-layer-shell must be loaded before libwayland-client, which a
+@@ -71,6 +74,10 @@
+ GHOST_W = 22        # fallback cursor size, when the theme can't be read
+ GHOST_H = 34
+ GHOST_ALPHA = 0.85  # so the ghost reads as a copy, not the real pointer
++MARK_PX = 32        # drawing box of the origin circle and the direction mark
++PROBE_MS = 400      # niri: give up locating the pointer after this long
++PROBE_REGION_PX = 1 << 15  # input region while probing: larger than any output
++CONFIG_PATH = "/etc/midscroll.conf"
+ FOCUS_POLL_SEC = 1.0
+ STALE_SEC = 5.0     # take the overlay down if the daemon stops talking
+ MAX_OFFSET = 100000  # ignore an implausible position line
+@@ -85,7 +92,8 @@
+ XCURSOR_IMAGE = 0xfffd0002  # chunk type for an image, in an Xcursor file
+ MAX_CURSOR_PX = 256         # sanity bound on an image we will map
+ 
+-FOCUS_TOOL = shutil.which("kdotool") if WAYLAND else shutil.which("xprop")
++FOCUS_TOOL = ((shutil.which("niri") if NIRI else shutil.which("kdotool"))
++              if WAYLAND else shutil.which("xprop"))
+ 
+ CSS = """
+ window { background: transparent; }
+@@ -211,6 +219,14 @@
+ def active_window_class():
+     """Class of the focused window, or "" if it can't be determined."""
+     try:
++        if WAYLAND and NIRI:
++            # niri: the focused window's app_id over its IPC socket.
++            out = subprocess.run(["niri", "msg", "--json", "focused-window"],
++                                 capture_output=True, text=True, timeout=5)
++            if out.returncode != 0:
++                return ""
++            window = json.loads(out.stdout)
++            return (window or {}).get("app_id") or ""
+         if WAYLAND:
+             # KDE only: kdotool drives KWin's scripting API.
+             out = subprocess.run(
+@@ -228,7 +244,7 @@
+         # daemon's substring match sees whichever casing the app uses.
+         m = re.search(r'=\s*"([^"]*)",\s*"([^"]*)"', out.stdout)
+         return f"{m.group(1)} {m.group(2)}" if m else ""
+-    except (OSError, subprocess.TimeoutExpired):
++    except (OSError, subprocess.TimeoutExpired, ValueError):
+         return ""
+ 
+ 
+@@ -236,7 +252,7 @@
+     """Push focus changes to the daemon until the connection dies."""
+     if not FOCUS_TOOL:
+         log.warning("%s not found; app blacklist will be inactive",
+-                    "kdotool" if WAYLAND else "xprop")
++                    ("niri" if NIRI else "kdotool") if WAYLAND else "xprop")
+         return
+     last = None
+     while not stop.is_set():
+@@ -294,6 +310,74 @@
+         cr.set_line_width(1.5)
+         cr.stroke()
+ 
++    def config_value(name, fallback):
++        """A number from the daemon's config, so the marks agree with it."""
++        try:
++            with open(CONFIG_PATH) as f:
++                for line in f:
++                    key, _, value = line.split("#", 1)[0].partition("=")
++                    if key.strip() == name:
++                        return float(value)
++        except (OSError, ValueError):
++            pass
++        return fallback
++
++    # Position lines carry the drag offset times GHOST_SCALE.
++    DEADZONE = (config_value("DEADZONE_PX", 15.0)
++                * config_value("GHOST_SCALE", 1.0))
++    SPEED_EXP = config_value("SPEED_EXP", 2.2)
++
++    def draw_origin(_area, cr, width, height, *_data):
++        """Windows-style origin mark: a ring with four arrowheads."""
++        cx, cy = width / 2, height / 2
++        r = min(width, height) / 2 - 2
++        cr.arc(cx, cy, r, 0, 2 * math.pi)
++        cr.set_source_rgba(1, 1, 1, 0.88)
++        cr.fill_preserve()
++        cr.set_source_rgba(0, 0, 0, 0.75)
++        cr.set_line_width(1.5)
++        cr.stroke()
++        cr.arc(cx, cy, 1.8, 0, 2 * math.pi)
++        cr.fill()
++        for k in range(4):
++            cr.save()
++            cr.translate(cx, cy)
++            cr.rotate(k * math.pi / 2)
++            cr.move_to(r - 3, 0)
++            cr.line_to(r - 8, -4)
++            cr.line_to(r - 8, 4)
++            cr.close_path()
++            cr.fill()
++            cr.restore()
++
++    def make_direction_drawer(overlay):
++        """Triangle at the hand position, pointing the way it scrolls."""
++        def draw(_area, cr, width, height, *_data):
++            dx, dy = overlay.offset
++            ex = dx if abs(dx) > DEADZONE else 0
++            ey = dy if abs(dy) > DEADZONE else 0
++            cx, cy = width / 2, height / 2
++            if not (ex or ey):
++                # Inside the dead zone: nothing scrolls, show a dot.
++                cr.arc(cx, cy, 4, 0, 2 * math.pi)
++            else:
++                # Each axis scrolls at |offset| ** SPEED_EXP, so point
++                # along the resulting velocity, not the raw offset.
++                vx = math.copysign(abs(ex) ** SPEED_EXP, ex) if ex else 0.0
++                vy = math.copysign(abs(ey) ** SPEED_EXP, ey) if ey else 0.0
++                cr.translate(cx, cy)
++                cr.rotate(math.atan2(vy, vx))
++                cr.move_to(12, 0)
++                cr.line_to(-7, -9)
++                cr.line_to(-7, 9)
++                cr.close_path()
++            cr.set_source_rgba(1, 1, 1, 0.92)
++            cr.fill_preserve()
++            cr.set_source_rgba(0, 0, 0, 0.8)
++            cr.set_line_width(1.5)
++            cr.stroke()
++        return draw
++
+     def make_ghost_drawer(cursor):
+         """Draw function for the ghost: your own pointer if we have it."""
+         def draw(_area, cr, width, height, *_data):
+@@ -324,29 +408,31 @@
+                          LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
+                 LayerShell.set_anchor(self.win, edge, True)
+ 
+-            icon = Gtk.Image.new_from_file(ICON_PATH)
+-            icon.set_pixel_size(ICON_PX)
+-            icon.set_halign(Gtk.Align.CENTER)
+-            icon.set_valign(Gtk.Align.CENTER)
+-            icon.set_hexpand(True)
+-            icon.set_vexpand(True)
+-            self.badge = Gtk.Box()
+-            self.badge.add_css_class("badge")
+-            self.badge.set_size_request(BADGE_PX, BADGE_PX)
+-            self.badge.append(icon)
+-            cursor = load_theme_cursor()
++            self.badge = Gtk.DrawingArea()
++            self.badge.set_size_request(MARK_PX, MARK_PX)
++            self.badge.set_draw_func(draw_origin)
+             self.ghost = Gtk.DrawingArea()
+-            if cursor is None:
+-                self.hotspot = (1, 1)  # the fallback arrow's tip
+-                self.ghost.set_size_request(GHOST_W, GHOST_H)
+-            else:
+-                self.hotspot = (cursor[1], cursor[2])
+-                self.ghost.set_size_request(cursor[0].get_width(),
+-                                            cursor[0].get_height())
+-            self.ghost.set_draw_func(make_ghost_drawer(cursor))
++            self.ghost.set_size_request(MARK_PX, MARK_PX)
++            self.ghost.set_draw_func(make_direction_drawer(self))
++            self.hotspot = (MARK_PX // 2, MARK_PX // 2)
++            # One transparent pixel, redrawn on every input-region change so
++            # the change is committed even while nothing else is shown.
++            self.kick = Gtk.DrawingArea()
++            self.kick.set_size_request(1, 1)
++            self.kick.set_draw_func(lambda *_a: None)
+             self.fixed = Gtk.Fixed()
++            self.fixed.put(self.kick, 0, 0)
+             self.fixed.put(self.badge, 0, 0)
+             self.fixed.put(self.ghost, 0, 0)
++            # niri has no IPC for the pointer position. While probing, the
++            # surface takes pointer input for the moment it takes niri to
++            # send an enter event, which carries the position; the motion
++            # is pinned by the daemon, so that is where the drag started.
++            self.probing = False
++            probe = Gtk.EventControllerMotion()
++            probe.connect("enter", self._probe_hit)
++            probe.connect("motion", self._probe_hit)
++            self.win.add_controller(probe)
+             self.win.set_child(self.fixed)
+ 
+             css = Gtk.CssProvider()
+@@ -372,7 +458,42 @@
+         def _make_click_through(self, *_):
+             surface = self.win.get_surface()
+             if surface is not None:
+-                surface.set_input_region(cairo.Region())
++                if self.probing:
++                    surface.set_input_region(cairo.Region(cairo.RectangleInt(
++                        0, 0, PROBE_REGION_PX, PROBE_REGION_PX)))
++                else:
++                    surface.set_input_region(cairo.Region())
++                self.kick.queue_draw()
++
++        def _start_probe(self):
++            self.probing = True
++            self.anchor = None
++            self.badge.set_visible(False)
++            self.ghost.set_visible(False)
++            self.win.set_visible(True)
++            self._make_click_through()
++            GLib.timeout_add(PROBE_MS, self._probe_timeout, self.seq)
++
++        def _probe_hit(self, _ctl, x, y):
++            if not self.probing:
++                return
++            self.probing = False
++            self._make_click_through()
++            surface = self.win.get_surface()
++            mon = Gdk.Display.get_default().get_monitor_at_surface(surface)
++            self.geo = mon.get_geometry() if mon is not None else None
++            self.anchor = (int(x), int(y))  # surface = monitor coordinates
++            self.badge.set_visible(True)
++            self.ghost.set_visible(True)
++            self._layout()
++
++        def _probe_timeout(self, seq):
++            if seq == self.seq and self.probing:
++                log.warning("pointer position not found; not drawing")
++                self.probing = False
++                self._make_click_through()
++                self.win.set_visible(False)
++            return False
+ 
+         def _check_stale(self):
+             """Watchdog for the two ways this could go wrong.
+@@ -400,10 +521,14 @@
+             self.active = active
+             self.seq += 1
+             if not active:
++                self.probing = False
+                 self.win.set_visible(False)
+                 self.anchor = None
+                 self.offset = (0, 0)
+                 return
++            if NIRI:
++                self._start_probe()
++                return
+             # The pointer is pinned for the whole drag, so one query does.
+             try:
+                 proc = Gio.Subprocess.new(
+@@ -461,8 +586,8 @@
+             if self.anchor is None:
+                 return
+             ax, ay = self.anchor
+-            self.fixed.move(self.badge, ax - BADGE_PX // 2,
+-                            ay - BADGE_PX // 2)
++            self.fixed.move(self.badge, ax - MARK_PX // 2,
++                            ay - MARK_PX // 2)
+             gx, gy = ax + self.offset[0], ay + self.offset[1]
+             if self.geo is not None:
+                 # Windows stops the cursor at the screen edge; so do we.
+@@ -472,6 +597,7 @@
+             # places the real one, so the ghost points at the same pixel.
+             self.fixed.move(self.ghost, gx - self.hotspot[0],
+                             gy - self.hotspot[1])
++            self.ghost.queue_draw()  # the triangle turns with the offset
+ 
+ 
+ def overflow_uid():
