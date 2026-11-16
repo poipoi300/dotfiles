@@ -1,0 +1,32 @@
+# Windows-style middle-drag autoscroll at the evdev/uinput layer, so it works in every app.
+# Packages the daemon and the session helper only: the settings GUI, its polkit action and
+# midscroll-apply are left out (settings live in the module's /etc/midscroll.conf).
+pkgname=midscroll
+pkgver=1.15
+pkgrel=1
+pkgdesc="Windows-style middle-button drag autoscroll (evdev/uinput, works on Wayland and X11)"
+arch=(any)
+url="https://github.com/gnhen/midscroll"
+license=(Unlicense)
+depends=(python python-evdev python-gobject python-cairo gtk4 gtk4-layer-shell librsvg)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/gnhen/midscroll/archive/refs/tags/v$pkgver.tar.gz"
+        niri-focus.patch)
+sha256sums=('8f0133be724b231ed7443fa1184491b92b5a071e5ac0a8b3a7d97300ed96c4fa'
+            '812463873047489ba08c7e5c84044b93e68a6623aad4c89d9f1abfac6073ee35')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # The app blacklist reads the focused window through kdotool (KWin) or xprop; add niri IPC.
+  patch -p1 < "$srcdir/niri-focus.patch"
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 midscroll.py "$pkgdir/usr/bin/midscroll"
+  install -Dm755 midscroll-overlay.py "$pkgdir/usr/bin/midscroll-overlay"
+  install -Dm644 systemd/midscroll.service "$pkgdir/usr/lib/systemd/system/midscroll.service"
+  install -Dm644 systemd/midscroll-overlay.service "$pkgdir/usr/lib/systemd/user/midscroll-overlay.service"
+  install -Dm644 icons/move-vertical.svg "$pkgdir/usr/share/midscroll/move-vertical.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md SECURITY.md -t "$pkgdir/usr/share/doc/$pkgname"
+}

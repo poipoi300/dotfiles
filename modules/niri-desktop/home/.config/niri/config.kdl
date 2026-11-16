@@ -56,10 +56,7 @@ input {
         // natural-scroll
         // accel-speed 0.2
         accel-profile "flat"
-        // Hold the middle button and move the mouse to scroll; a click without
-        // movement still reaches the app as a normal middle click.
-        scroll-method "on-button-down"
-        scroll-button 274
+        // scroll-method "no-scroll"
     }
 
     trackpoint {
@@ -240,7 +237,6 @@ window-rule {
 }
 window-rule {
     match app-id=r#"^org\.wezfurlong\.wezterm$"#
-    match app-id="Alacritty"
     match app-id=r#"^com\.mitchellh\.ghostty$"#
     match app-id="zen"
     draw-border-with-background false

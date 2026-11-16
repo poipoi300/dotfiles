@@ -52,6 +52,10 @@
       "layout.frame_rate": {
         "Value": -1,
         "Status": "default"
+      },
+      "general.autoScroll": {
+        "Value": true,
+        "Status": "default"
       }
     }
   }

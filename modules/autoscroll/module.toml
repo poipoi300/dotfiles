@@ -1,0 +1,10 @@
+description = "Windows-style middle-button autoscroll: midscroll daemon for every app, native click-to-scroll in Chromium/Electron apps"
+category    = "desktop"
+requires    = []
+
+[packages]
+local = ["midscroll"]
+
+[units]
+system = ["midscroll.service"]
+user   = ["midscroll-overlay.service"]
