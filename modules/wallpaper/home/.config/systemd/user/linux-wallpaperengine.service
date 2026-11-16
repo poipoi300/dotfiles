@@ -10,9 +10,9 @@ Environment=__GL_THREADED_OPTIMIZATIONS=0
 ExecStart=%h/.local/bin/wallpaperengine-start
 Restart=on-failure
 RestartSec=5
-# The renderer sometimes ignores SIGTERM and systemd waited the default 90 s
-# before SIGKILL, which delayed every Apply. It holds no state worth a clean exit.
-TimeoutStopSec=2
+# The renderer sometimes ignores SIGTERM, and it holds no state worth a clean
+# exit, so stop it with SIGKILL straight away.
+KillSignal=SIGKILL
 
 [Install]
 WantedBy=niri.service
