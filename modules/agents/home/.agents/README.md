@@ -86,6 +86,13 @@ pending tool adaptation. The account-synced `skill-creator`
 stays Claude-only to avoid shadowing Codex's bundled `skill-creator`. `skill-pressure-testing`
 (formerly `writing-skills`) is only for explicitly requested test-first pressure testing; ordinary
 creation uses the runtime's own authoring skill.
+On 2026-11-15 six PR-workflow skills were imported from tstack (MIT, upstream commit in each
+skill's `metadata.source`, license copied beside it): `file-pr`, `babysit-pr` (with its
+`pr-wait` script), `leaving-pr-comments`, `sol-loop`, `full-send`, and `full-stop`. Local changes:
+`babysit-pr` says when to use `--until green` and what it skips; `full-send` checks usage first,
+names the GUI testing rule, and adds `ml-reviewer` for ML changes; `full-stop` names the GUI
+rule; `sol-loop` falls back to another model family per AGENTS.md instead of stopping;
+`file-pr`'s model line replaces harness attribution. Compare against upstream before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 
