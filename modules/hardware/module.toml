@@ -1,9 +1,10 @@
-description = "Hardware tools: RGB, fans, sensors, disks, webcam, UPS"
+description = "Hardware tools: RGB, mouse, fans, sensors, disks, webcam, UPS"
 category    = "system"
 
 [packages]
 pacman = ["openrgb", "coolercontrol", "lm_sensors", "nvtop", "cpu-x", "smartmontools",
-          "gsmartcontrol", "kdiskmark", "cameractrls", "v4l-utils", "nut", "gdu"]
+          "gsmartcontrol", "kdiskmark", "cameractrls", "v4l-utils", "nut", "gdu",
+          "piper"]   # gaming mouse buttons, DPI and LEDs (libratbag)
 aur    = ["opentabletdriver"]
 
 [units]
