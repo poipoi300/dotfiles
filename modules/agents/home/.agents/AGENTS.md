@@ -75,6 +75,25 @@ subagent type. GPT is usually good for harsh technical and math critiques. For
 ML changes, include data and experiment sanity checks; for auth, input handling,
 or secrets, include a security review.
 
+## GUI testing
+
+Never test GUI behaviour in the user's live desktop session: don't open test windows on their
+outputs, restart their shell/bar/dock services, or drive their pointer. Run the app under its own
+compositor instance with its own `WAYLAND_DISPLAY` (and `NIRI_SOCKET` when relevant), export those
+only to the processes under test, and tear the instance down afterwards. Pick the backend by what
+the test needs:
+
+- Headless, nothing on screen (default): `WLR_BACKENDS=headless WLR_RENDERER=gles2 sway -c <scratch
+  config>` (`pixman` renderer if no GPU path); add outputs with `swaymsg create_output` and set their
+  mode; capture with `grim`. Supports layer-shell, so it fits bars, docks and wallpapers.
+- niri-specific behaviour (niri IPC, window rules, its layout): a nested `niri -c <scratch config>
+  -- <cmd>`, never with `--session`. It opens as one window in the user's session, so warn the user
+  first and keep it short.
+- Plain app windows with no compositor-specific needs: either of the above, or `cage` for one window.
+
+Real hardware or session services (audio devices, the user's wallpaper unit) may be touched only when
+the test requires it; record the original state and restore it. Report screenshots by path.
+
 ## Shell and links
 
 Do not prefix commands with `cd` to the existing working directory; set the

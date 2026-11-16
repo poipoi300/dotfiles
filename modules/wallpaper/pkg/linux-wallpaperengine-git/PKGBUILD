@@ -1,6 +1,6 @@
 # Based on the AUR recipe by Alexis Maiquez <aur@almamu.com>, pinned to a commit and patched:
-# parallax-fixes.patch: "cameraparallaxdelay" is a smoothing time (as in Wallpaper Engine), not a
-# per-second rate; and vertical parallax is scaled by the scene height, not its width.
+# parallax-fixes.patch: "cameraparallaxdelay" is a smoothing time (as in Wallpaper Engine); vertical
+# parallax uses the scene height; full-scene layers only move within their overhang (no clear colour).
 pkgname=linux-wallpaperengine-git
 _pkgname=linux-wallpaperengine
 pkgver=r643.a0ddce58
@@ -15,7 +15,7 @@ provides=("linux-wallpaperengine")
 _commit=a0ddce586e9ff12e9d31ca6b103f6036cc1b68fe
 source=("${pkgname}::git+https://github.com/Almamu/linux-wallpaperengine.git#commit=${_commit}"
         "parallax-fixes.patch")
-sha256sums=('SKIP' '1eef4cdc3492043e4be58f5612fe52cd984f060f5a074e4ce92118f3558a84c3')
+sha256sums=('SKIP' 'e788d49a8c6f0752a7bbb77b094aeeef989132c633e5301c52d7898f9f15fbf1')
 
 pkgver() {
     cd "$pkgname"
