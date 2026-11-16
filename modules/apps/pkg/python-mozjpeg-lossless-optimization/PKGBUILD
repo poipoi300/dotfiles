@@ -1,0 +1,40 @@
+# The PyPI sdist vendors MozJPEG; no submodule/network fetch is needed at build time.
+# Keep MozJPEG's progressive scan optimization; upstream has no system JPEG switch.
+pkgname=python-mozjpeg-lossless-optimization
+pkgver=1.3.3
+pkgrel=1
+pkgdesc="Lossless JPEG optimization using MozJPEG"
+arch=(x86_64)
+url="https://github.com/wanadev/mozjpeg-lossless-optimization"
+license=(BSD-3-Clause IJG Zlib)
+depends=(python python-cffi glibc)
+makedepends=(python-build python-installer python-setuptools python-wheel cmake nasm)
+checkdepends=(python-pytest)
+# v1.3.3; the sdist omits the JPEG required by its included test suite.
+_testcommit=9f76f6dbdd55ae76120180a978f0a783e4b81d61
+source=("https://files.pythonhosted.org/packages/source/m/mozjpeg-lossless-optimization/mozjpeg_lossless_optimization-$pkgver.tar.gz"
+        "test-image-$pkgver.jpg::https://raw.githubusercontent.com/wanadev/mozjpeg-lossless-optimization/$_testcommit/tests/image.jpg")
+sha256sums=('aee20943cae353f28271e042415fac42876e6dd553310d1d406442ee2a097f9c'
+            '6b922b35ebe6fc69e478f56b8a590e2d7d862f53cbac6b52df744ecf58ffc907')
+prepare() {
+  cd "mozjpeg_lossless_optimization-$pkgver"
+  cp "$srcdir/test-image-$pkgver.jpg" tests/image.jpg
+}
+build() {
+  cd "mozjpeg_lossless_optimization-$pkgver"
+  python -m build --wheel --no-isolation
+}
+check() {
+  cd "mozjpeg_lossless_optimization-$pkgver"
+  # Test the built extension, rather than the unbuilt source package.
+  local buildlib=(build/lib.*)
+  PYTHONSAFEPATH=1 PYTHONPATH="$PWD/${buildlib[0]}${PYTHONPATH:+:$PYTHONPATH}" python -m pytest --import-mode=importlib tests
+}
+package() {
+  cd "mozjpeg_lossless_optimization-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 mozjpeg/LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/mozjpeg-LICENSE.md"
+  install -Dm644 mozjpeg/README.ijg "$pkgdir/usr/share/licenses/$pkgname/README.ijg"
+  install -Dm644 mozjpeg/simd/nasm/jsimdext.inc "$pkgdir/usr/share/licenses/$pkgname/jsimdext.inc"
+}

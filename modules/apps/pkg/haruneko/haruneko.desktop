@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HaruNeko
+Comment=Manga, anime and novel downloader
+Exec=haruneko %U
+Icon=haruneko
+Terminal=false
+Categories=Network;

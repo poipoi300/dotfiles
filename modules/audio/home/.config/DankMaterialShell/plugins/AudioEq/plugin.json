@@ -1,0 +1,11 @@
+{
+  "id": "audioEq",
+  "name": "Audio EQ Rocker",
+  "description": "Headphones | Off | Speakers, with independent mic processing",
+  "version": "1.0.0",
+  "author": "Audio module contributors",
+  "type": "widget",
+  "capabilities": ["dankbar-widget"],
+  "component": "./AudioEqWidget.qml",
+  "icon": "equalizer"
+}

@@ -1,0 +1,37 @@
+# The newest upstream Linux build is prerelease 260903T1833, distributed only as a Snap.
+# Extract the payload; do not install Snap hooks or its launcher (--no-sandbox).
+# Keep its matched Electron 44.1.1 runtime: system Electron compatibility is unverified.
+# This pins the desktop client only: upstream loads https://app.hakuneko.download live.
+pkgname=haruneko
+pkgver=2026.09.03.1833
+pkgrel=1
+pkgdesc="HaruNeko manga downloader (upstream prerelease, bundled Electron)"
+arch=(x86_64)
+url="https://github.com/manga-download/haruneko"
+license=(Unlicense BSD-3-Clause)
+depends=(alsa-lib at-spi2-core cairo libcups dbus expat glib2 glibc gtk3 libdrm libx11 libxcb libxcomposite libxdamage libxext libxfixes libxkbcommon libxrandr mesa nspr nss pango systemd-libs libgcc libstdc++)
+makedepends=(squashfs-tools)
+options=(!strip)
+source=("haruneko-260903T1833.snap::https://github.com/manga-download/haruneko/releases/download/260903T1833/hakuneko-electron-v44.1.1-linux-x64.snap"
+        "haruneko.png::https://raw.githubusercontent.com/manga-download/haruneko/f8e87b4ad2e35b2b22f88002a23006cd784e209c/app/res/darwin/app.iconset/icon_256x256.png"
+        "haruneko.UNLICENSE::https://raw.githubusercontent.com/manga-download/haruneko/f8e87b4ad2e35b2b22f88002a23006cd784e209c/UNLICENSE"
+        haruneko.desktop haruneko)
+noextract=(haruneko-260903T1833.snap)
+sha256sums=('3ebdcb0c7521810bfb28f867469967163c1e4eb5e02279a8b8067d160c883d5f'
+            'ff73807bdf7323b861da72e0b96c8bc66185dbb3294d36d491c3cc58d58272be'
+            '6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e'
+            'c5d193268986572ecd83b30280661685dddbd47c12da780c24e73ae9648fd3c8'
+            'ffe2dd645c7ce6d375ebfdc6a3a1fe461a61a424811f700844d6d074e46d70a4')
+package() {
+  unsquashfs -force -no-progress -d "$srcdir/payload" "$srcdir/haruneko-260903T1833.snap"
+  install -d "$pkgdir/opt/haruneko"
+  cp -a "$srcdir/payload/"{hakuneko-electron,chrome_crashpad_handler,chrome-sandbox,chrome_100_percent.pak,chrome_200_percent.pak,icudtl.dat,libffmpeg.so,libvk_swiftshader.so,libvulkan.so.1,locales,resources,resources.pak,snapshot_blob.bin,v8_context_snapshot.bin,vk_swiftshader_icd.json,version} "$pkgdir/opt/haruneko/"
+  # Chromium's helper must be owned by root with its upstream-required setuid mode.
+  chmod 4755 "$pkgdir/opt/haruneko/chrome-sandbox"
+  install -Dm755 haruneko "$pkgdir/usr/bin/haruneko"
+  install -Dm644 haruneko.desktop "$pkgdir/usr/share/applications/haruneko.desktop"
+  install -Dm644 haruneko.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/haruneko.png"
+  install -Dm644 haruneko.UNLICENSE "$pkgdir/usr/share/licenses/$pkgname/UNLICENSE"
+  install -Dm644 payload/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE.electron"
+  install -Dm644 payload/LICENSES.chromium.html "$pkgdir/usr/share/licenses/$pkgname/LICENSES.chromium.html"
+}

@@ -2,7 +2,7 @@ description = "Desktop applications"
 category    = "apps"
 
 [packages]
-local  = ["pear-desktop-poipoi"]   # own fork, replaces the AUR pear-desktop
+local  = ["pear-desktop-poipoi", "haruneko", "svp", "python-mozjpeg-lossless-optimization", "kcc"]   # pear: own fork
 pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "partitionmanager",
           "ark", "mpv", "bitwarden", "qbittorrent", "okular", "libreoffice-fresh", "blender",
           "obs-studio", "audacity", "handbrake", "ffmpeg", "vapoursynth", "satty", "grim",

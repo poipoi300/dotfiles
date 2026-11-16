@@ -1,0 +1,32 @@
+# v13.0.1 resolves to this exact commit (lightweight upstream tag).
+# Build python-mozjpeg-lossless-optimization from the sibling own-build recipe first.
+# Arch python-pymupdf provides the full pymupdf API in place of upstream's lite wheel.
+pkgname=kcc
+pkgver=13.0.1
+pkgrel=1
+_commit=892f2a8df0a9db4b43f36e97d255f9ec1582314a
+pkgdesc="Kindle Comic Converter"
+arch=(any)
+url="https://github.com/ciromattia/kcc"
+license=(ISC)
+depends=(python pyside6 'python-pillow>=11.3.0' 'python-psutil>=7.2.2' 'python-requests>=2.34.2' 'python-slugify>=9.1.3' 'python-packaging>=26.2' 'python-natsort>=8.4.0' 'python-numpy>=1.22.4' 'python-pymupdf>=2.0' 'python-mozjpeg-lossless-optimization>=1.2.0')
+makedepends=(python-setuptools python-wheel)
+optdepends=('7zip: archive support' 'kindlegen: MOBI output (proprietary, obtain separately)')
+source=("kcc-$pkgver-$_commit.tar.gz::https://codeload.github.com/ciromattia/kcc/tar.gz/$_commit" kcc.desktop)
+sha256sums=('3f494be5908144dd56b0610d7a5e6ee87c8622c36a6da625b3a1383de915ae7a'
+            '73066c2c4d072c1344cd0dbfd372b75ae2901f61b25442dbde83ddf7cfa8ce7d')
+prepare() {
+  cd "kcc-$_commit"
+  sed -i 's/pymupdf-lite>=2.0/PyMuPDF>=2.0/' setup.py
+}
+build() {
+  cd "kcc-$_commit"
+  python setup.py build
+}
+package() {
+  cd "kcc-$_commit"
+  python setup.py install --root="$pkgdir" --prefix=/usr --skip-build --optimize=1
+  install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 icons/comic2ebook.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/kcc.png"
+  install -Dm644 "$srcdir/kcc.desktop" "$pkgdir/usr/share/applications/kcc.desktop"
+}

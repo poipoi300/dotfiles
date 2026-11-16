@@ -3,7 +3,7 @@ category    = "desktop"
 requires    = ["gaming", "niri-desktop"]   # Steam holds Wallpaper Engine's assets and workshop items
 
 [packages]
-local = ["linux-wallpaperengine-git"]   # patched own build, see pkg/
+local = ["linux-wallpaperengine-git", "wpe-gallery"]   # patched own build, see pkg/
 
 [units]
 user = ["linux-wallpaperengine.service"]

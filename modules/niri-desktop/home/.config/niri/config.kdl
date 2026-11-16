@@ -277,3 +277,6 @@ include "dms/outputs.kdl"
 include "dms/cursor.kdl"
 
 include "dms/windowrules.kdl"
+
+// Audio EQ rocker and mic preset keys (audio module).
+include "audio-binds.kdl"

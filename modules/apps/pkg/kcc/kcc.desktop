@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Kindle Comic Converter
+Exec=kcc %F
+Icon=kcc
+Terminal=false
+Categories=Graphics;Publishing;

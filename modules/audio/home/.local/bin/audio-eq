@@ -1,0 +1,73 @@
+#!/bin/sh
+# Owns both EasyEffects chains; use this control instead of the global bypass.
+set -eu
+state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/audio-eq
+state_file=$state_dir/state
+usage() { echo 'Usage: audio-eq headphones|speakers|off|toggle-headphones|toggle-speakers|status|mic on|off|toggle' >&2; exit 2; }
+[ "$#" -ge 1 ] || usage
+command=$1
+case "$command" in
+    mic) [ "$#" -eq 2 ] || usage; case "$2" in on|off|toggle) ;; *) usage;; esac ;;
+    headphones|speakers|off|toggle-headphones|toggle-speakers|status|restore) [ "$#" -eq 1 ] || usage ;;
+    *) usage ;;
+esac
+mkdir -p "$state_dir"
+# Start before locking: the unit's ExecStartPost restores state using this script.
+case "$command" in status|restore) ;; *) systemctl --user start easyeffects.service ;; esac
+exec 9>"$state_dir/lock"
+flock -x 9
+output=off
+mic=off
+if [ -f "$state_file" ]; then
+    output=$(jq -er '.output | select(. == "off" or . == "headphones" or . == "speakers")' "$state_file")
+    mic=$(jq -er '.mic | select(. == "off" or . == "on")' "$state_file")
+fi
+write_state() {
+    tmp=$(mktemp "$state_dir/.state.XXXXXX")
+    jq -n --arg output "$output" --arg mic "$mic" '{output:$output,mic:$mic}' >"$tmp"
+    mv -f "$tmp" "$state_file"
+}
+if [ "$command" = status ]; then
+    [ -f "$state_file" ] || write_state
+    cat "$state_file"
+    exit
+fi
+old_output=$output
+old_mic=$mic
+case "$command" in
+    toggle-headphones) if [ "$output" = headphones ]; then output=off; else output=headphones; fi ;;
+    toggle-speakers) if [ "$output" = speakers ]; then output=off; else output=speakers; fi ;;
+    headphones|speakers|off) output=$command ;;
+    mic) case "$2" in toggle) if [ "$mic" = on ]; then mic=off; else mic=on; fi;; *) mic=$2;; esac ;;
+esac
+# Do not let an early CLI request become the primary EasyEffects process.
+attempt=0
+while [ ! -S "${XDG_RUNTIME_DIR:?}/EasyEffectsServer" ]; do
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 100 ] || { echo 'EasyEffects socket did not appear' >&2; exit 1; }
+    sleep 0.1
+done
+load() {
+    easyeffects -l "$2"
+    # The CLI forwards requests asynchronously; confirm actual application.
+    attempt=0
+    while [ "$(easyeffects -a "$1")" != "$2" ]; do
+        attempt=$((attempt + 1))
+        [ "$attempt" -lt 30 ] || { echo "EasyEffects did not apply $2" >&2; exit 1; }
+        sleep 0.1
+    done
+}
+# Restore both chains after service startup; otherwise only touch the selected chain.
+if [ "$command" = restore ] || [ "$command" != mic ]; then
+    case "$output" in headphones) preset=Headphones;; speakers) preset=Speakers;; off) preset='Output Off';; esac
+    load output "$preset"
+fi
+if [ "$command" = restore ] || [ "$command" = mic ]; then
+    if [ "$mic" = on ]; then preset=Mic; else preset='Mic Off'; fi
+    load input "$preset"
+fi
+easyeffects -b 2
+write_state
+if [ "$command" != restore ] && { [ "$old_output" != "$output" ] || [ "$old_mic" != "$mic" ]; }; then
+    notify-send -a 'Audio EQ' 'Audio effects' "Output: $output · Mic: $mic" || :
+fi

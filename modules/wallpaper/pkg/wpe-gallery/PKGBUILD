@@ -1,0 +1,38 @@
+# Maintainer: wpe-gallery contributors
+pkgname=wpe-gallery
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native GPUI gallery for installed Wallpaper Engine wallpapers'
+arch=('x86_64' 'aarch64')
+url='https://github.com/poipoi300/wpe-gallery'
+license=('MIT')
+depends=('linux-wallpaperengine' 'wayland' 'libxkbcommon' 'libx11' 'libxcb'
+         'libxrandr' 'libxi' 'libxcursor' 'fontconfig' 'freetype2'
+         'vulkan-icd-loader' 'gcc-libs' 'glibc')
+makedepends=('git' 'rust' 'clang' 'cmake' 'pkgconf')
+optdepends=('niri: fallback output detection' 'noto-fonts-cjk: CJK wallpaper titles'
+            'python: optional standalone renderer integration')
+_commit='9e86363a2778bd0ea0586a7253f9d6adfee32a57'
+source=("$pkgname::git+https://github.com/poipoi300/wpe-gallery.git#commit=$_commit")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$srcdir/$pkgname"
+    cargo test --locked
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+    install -Dm755 "${CARGO_TARGET_DIR:-target}/release/wpe-gallery" "$pkgdir/usr/bin/wpe-gallery"
+    install -Dm644 assets/io.github.poipoi300.wpe-gallery.desktop "$pkgdir/usr/share/applications/io.github.poipoi300.wpe-gallery.desktop"
+    install -Dm644 assets/io.github.poipoi300.wpe-gallery.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.poipoi300.wpe-gallery.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm755 integration/wallpaperengine-start "$pkgdir/usr/share/doc/$pkgname/integration/wallpaperengine-start"
+    install -Dm644 integration/linux-wallpaperengine.service "$pkgdir/usr/share/doc/$pkgname/integration/linux-wallpaperengine.service"
+}

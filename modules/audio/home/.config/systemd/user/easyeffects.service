@@ -1,0 +1,17 @@
+[Unit]
+Description=EasyEffects audio processing and EQ rocker
+Documentation=https://github.com/wwmm/easyeffects
+After=pipewire.service pipewire-pulse.service wireplumber.service graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=exec
+Environment=LANG=C.UTF-8
+ExecStartPre=%h/.local/bin/audio-eq-prepare
+ExecStart=/usr/bin/easyeffects --gapplication-service
+ExecStartPost=%h/.local/bin/audio-eq restore
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

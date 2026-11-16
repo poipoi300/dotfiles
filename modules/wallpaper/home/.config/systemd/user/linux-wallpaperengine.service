@@ -4,7 +4,7 @@ PartOf=niri.service
 After=niri.service
 
 [Service]
-EnvironmentFile=%h/.config/linux-wallpaperengine/wallpaper.env
+EnvironmentFile=-%h/.config/linux-wallpaperengine/wallpaper.env
 # Threaded GL optimisations off: documented workaround for NVIDIA GL errors.
 Environment=__GL_THREADED_OPTIMIZATIONS=0
 ExecStart=%h/.local/bin/wallpaperengine-start

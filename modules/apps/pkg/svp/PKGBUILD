@@ -1,0 +1,48 @@
+# Based on the reviewed AUR svp-bin 4.7.305-3 sources; identical SHA-256 pins.
+# Vendor www endpoint has valid TLS; cdn endpoint has a hostname mismatch.
+# No .install file: pacman owns the menu entry/icons; vendor scripts never run.
+pkgname=svp
+pkgver=4.7.305
+pkgrel=1
+pkgdesc="SmoothVideo Project 4 Pro frame interpolation"
+arch=(x86_64)
+url="https://www.svp-team.com/wiki/SVP:Linux"
+license=(LicenseRef-proprietary)
+depends=(libmediainfo libusb lsof vapoursynth qt6-svg xdg-utils)
+makedepends=(7zip python)
+optdepends=('mpv: video player (requires VapourSynth support)' 'ocl-icd: GPU acceleration' 'vlc: video player' 'python38: legacy SVPTube extension (not in Arch repositories)' 'python-certifi: SVPTube certificates' 'python-pycryptodomex: SVPTube encrypted streams' 'python-websockets: SVPTube websocket support')
+provides=(svp-bin)
+conflicts=(svp-bin)
+options=(!strip)
+source=("https://www.svp-team.com/files/svp4-linux.$pkgver-1.tar.bz2"
+        "https://www.svp-team.com/files/repo/full-lin64/core.full/4.7.0.305-5libs.7z"
+        "https://www.svp-team.com/files/repo/full-lin64/core.full/4.7.0.305-5licenses.7z"
+        "https://www.svp-team.com/files/repo/full-lin64/core.full/4.7.0.305-5content.7z"
+        svp.desktop extract-installer.py)
+noextract=(4.7.0.305-5libs.7z 4.7.0.305-5licenses.7z 4.7.0.305-5content.7z)
+sha256sums=('6bd83a03ac43cb1efb0e252d12bc379cb6e8b6037b4b4973017ce977b1b2925e'
+            '99c9aeeba3743f232edbb74aed4cfd9a0df8d2d0d3098cbf54b6ee7191c836df'
+            '80abbaf3d547162abc131114f51f643595edbde8709d5e004e35f6dd2b8c7933'
+            '0b5c2da9c35162a7c684fe7c5f013b82f6ff8a58732aa5f791580ae850380ff2'
+            'ea7595c7eeff428671ac1371ec1e687d5839288dc89e1c7011c86506ebaf0f0f'
+            'e84ec89a9d790f00724b2032fa79c80f1f6a941d644da7572abef7b5c2e38744')
+prepare() {
+  python extract-installer.py
+  for part in libs licenses content; do
+    7z x -y -oextracted "4.7.0.305-5$part.7z"
+  done
+  test -x extracted/SVPManager
+}
+package() {
+  install -d "$pkgdir/opt/svp" "$pkgdir/usr/bin" "$pkgdir/usr/share/licenses/$pkgname"
+  cp -a extracted/. "$pkgdir/opt/svp/"
+  cp -a "$pkgdir/opt/svp/licenses/." "$pkgdir/usr/share/licenses/$pkgname/"
+  rm -r "$pkgdir/opt/svp/licenses"
+  rm "$pkgdir/opt/svp/add-menuitem.sh" "$pkgdir/opt/svp/remove-menuitem.sh"
+  ln -s /opt/svp/SVPManager "$pkgdir/usr/bin/SVPManager"
+  install -Dm644 svp.desktop "$pkgdir/usr/share/applications/svp.desktop"
+  for size in 32 48 64 128; do
+    install -Dm644 "extracted/svp-manager4-$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/svp-manager4.png"
+  done
+  chmod -R a+rX "$pkgdir/opt/svp" "$pkgdir/usr/share/licenses/$pkgname"
+}
