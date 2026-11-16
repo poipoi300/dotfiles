@@ -7,5 +7,5 @@ pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7
 aur    = ["yay"]
 
 [units]
-system = ["fstrim.timer"]
+system = ["fstrim.timer", "systemd-timesyncd.service"]
 user   = ["ssh-agent.service"]
