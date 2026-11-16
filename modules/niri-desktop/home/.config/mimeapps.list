@@ -20,7 +20,11 @@ video/webm=mpv.desktop
 audio/mpeg=mpv.desktop
 audio/flac=mpv.desktop
 image/png=org.kde.krita.desktop
+x-scheme-handler/grokbot=grok-bot.desktop
+x-scheme-handler/sand=grok-bot.desktop
 
 [Added Associations]
 inode/directory=org.kde.dolphin.desktop;
 text/plain=dev.zed.Zed.desktop;
+x-scheme-handler/grokbot=grok-bot.desktop;
+x-scheme-handler/sand=grok-bot.desktop;
