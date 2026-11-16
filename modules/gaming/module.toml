@@ -1,7 +1,10 @@
-description = "Gaming: Steam, MangoHud and GOverlay"
+description = "Gaming: Steam, MangoHud and GOverlay, Proton tools"
 category    = "games"
 
 [packages]
 local  = ["cosmos-cheathappens"]   # closed source, runs as root via sudo (user accepted)
-pacman = ["steam", "mangohud", "goverlay", "lutris", "prismlauncher"]
-aur    = ["heroic-games-launcher-bin", "r2modman-bin", "osu-lazer-bin", "sunshine"]
+pacman = ["steam", "mangohud", "goverlay", "lutris", "prismlauncher",
+          "flite",          # Minecraft's narrator loads libflite on Linux
+          "protontricks"]   # winetricks for Proton games
+aur    = ["heroic-games-launcher-bin", "r2modman-bin", "osu-lazer-bin", "sunshine",
+          "protonplus"]   # GE-Proton and other compatibility tools
