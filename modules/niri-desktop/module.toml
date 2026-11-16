@@ -1,11 +1,11 @@
-description = "niri session with DankMaterialShell, fuzzel launcher, alacritty, portals and NetworkManager"
+description = "niri session with DankMaterialShell, fuzzel launcher, ghostty (alacritty kept), portals and NetworkManager"
 category    = "desktop"
 requires    = ["audio"]
 
 [packages]
 pacman = ["niri", "xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-gtk",
           "polkit-gnome", "qt5-wayland", "qt6-wayland", "cliphist", "fuzzel", "matugen", "cava",
-          "networkmanager", "network-manager-applet", "alacritty", "ttf-firacode-nerd",
+          "networkmanager", "network-manager-applet", "alacritty", "ghostty", "ttf-firacode-nerd",
           "quickshell", "xdg-utils", "inter-font"]
 aur    = ["dms-shell-bin"]
 
