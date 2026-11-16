@@ -9,8 +9,8 @@ Windows-style middle-button autoscroll in every app.
   still, and stops on release. A click without a drag still reaches the app as a middle click.
   The settings GUI, its polkit action and `midscroll-apply` are not packaged.
 - `niri.patch` adds niri support to the session helper (`midscroll-overlay`, a user unit):
-  - The focused window comes from `niri msg --json focused-window` (upstream only knows kdotool
-    and xprop). The daemon pauses while a `BLACKLIST` app is focused, so apps that use
+  - The focused window comes from one long-lived `niri msg --json event-stream` (upstream polls
+    kdotool or xprop every second). The daemon pauses while a `BLACKLIST` app is focused, so apps that use
     middle-drag themselves (Blender, games) get the raw button.
   - niri has no IPC for the pointer position. When a drag starts, the full-screen overlay takes
     pointer input until niri sends it an enter event carrying the position (one or two frames),

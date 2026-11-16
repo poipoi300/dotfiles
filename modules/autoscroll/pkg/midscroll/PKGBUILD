@@ -3,7 +3,7 @@
 # midscroll-apply are left out (settings live in the module's /etc/midscroll.conf).
 pkgname=midscroll
 pkgver=1.15
-pkgrel=3
+pkgrel=4
 pkgdesc="Windows-style middle-button drag autoscroll (evdev/uinput, works on Wayland and X11)"
 arch=(any)
 url="https://github.com/gnhen/midscroll"
@@ -12,13 +12,13 @@ depends=(python python-evdev python-gobject python-cairo gtk4 gtk4-layer-shell)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/gnhen/midscroll/archive/refs/tags/v$pkgver.tar.gz"
         niri.patch)
 sha256sums=('8f0133be724b231ed7443fa1184491b92b5a071e5ac0a8b3a7d97300ed96c4fa'
-            'f02b1a9dca59b7c28a288b1051a2d55bf6008c58538b67e65be64e7bc8c3a44c')
+            'c7e101a29babe122d299c2cda94447aa37216490f2dfe1acea89a65a7c522aca')
 
 prepare() {
   cd "$pkgname-$pkgver"
   # niri support for the session helper: the focused window for the app blacklist comes from
-  # niri IPC, the pointer position from a brief pointer-enter probe, and the marks are a ring at
-  # the press point and a triangle at the hand pointing the way it scrolls.
+  # niri's event stream, the pointer position from a brief pointer-enter probe, and the marks
+  # are a ring at the press point and a triangle at the hand pointing the way it scrolls.
   patch -p1 < "$srcdir/niri.patch"
 }
 

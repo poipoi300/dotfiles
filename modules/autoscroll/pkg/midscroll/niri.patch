@@ -1,5 +1,5 @@
 --- a/midscroll-overlay.py	2026-11-15 23:18:25.974595732 -0500
-+++ b/midscroll-overlay.py	2026-11-15 23:22:42.765492892 -0500
++++ b/midscroll-overlay.py	2026-11-16 06:30:16.189490816 -0500
 @@ -30,7 +30,9 @@
  
  import array
@@ -29,50 +29,79 @@
  FOCUS_POLL_SEC = 1.0
  STALE_SEC = 5.0     # take the overlay down if the daemon stops talking
  MAX_OFFSET = 100000  # ignore an implausible position line
-@@ -85,7 +92,8 @@
- XCURSOR_IMAGE = 0xfffd0002  # chunk type for an image, in an Xcursor file
- MAX_CURSOR_PX = 256         # sanity bound on an image we will map
- 
--FOCUS_TOOL = shutil.which("kdotool") if WAYLAND else shutil.which("xprop")
-+FOCUS_TOOL = ((shutil.which("niri") if NIRI else shutil.which("kdotool"))
-+              if WAYLAND else shutil.which("xprop"))
- 
- CSS = """
- window { background: transparent; }
-@@ -211,6 +219,14 @@
- def active_window_class():
-     """Class of the focused window, or "" if it can't be determined."""
-     try:
-+        if WAYLAND and NIRI:
-+            # niri: the focused window's app_id over its IPC socket.
-+            out = subprocess.run(["niri", "msg", "--json", "focused-window"],
-+                                 capture_output=True, text=True, timeout=5)
-+            if out.returncode != 0:
-+                return ""
-+            window = json.loads(out.stdout)
-+            return (window or {}).get("app_id") or ""
-         if WAYLAND:
-             # KDE only: kdotool drives KWin's scripting API.
-             out = subprocess.run(
-@@ -228,7 +244,7 @@
-         # daemon's substring match sees whichever casing the app uses.
-         m = re.search(r'=\s*"([^"]*)",\s*"([^"]*)"', out.stdout)
-         return f"{m.group(1)} {m.group(2)}" if m else ""
--    except (OSError, subprocess.TimeoutExpired):
-+    except (OSError, subprocess.TimeoutExpired, ValueError):
+@@ -232,8 +239,71 @@
          return ""
  
  
-@@ -236,7 +252,7 @@
++def follow_niri_focus(sock, stop):
++    """Push the focused window's app_id from niri's event stream.
++
++    One long-lived `niri msg event-stream` instead of a query per second.
++    Returns False once the daemon connection is gone.
++    """
++    try:
++        proc = subprocess.Popen(["niri", "msg", "--json", "event-stream"],
++                                stdout=subprocess.PIPE,
++                                stderr=subprocess.DEVNULL, text=True)
++    except OSError as err:
++        log.warning("niri event stream unavailable: %s", err)
++        return True
++    # Unblock the read below when the connection ends.
++    threading.Thread(target=lambda: (stop.wait(), proc.terminate()),
++                     daemon=True).start()
++    apps, focused, last = {}, None, None
++    try:
++        for line in proc.stdout:
++            try:
++                apps, focused = niri_focus_update(line, apps, focused)
++            except (ValueError, AttributeError, KeyError, TypeError):
++                continue  # not one JSON object of the expected shape
++            cls = apps.get(focused, "")
++            if cls != last:
++                last = cls
++                try:
++                    sock.sendall(b"focus " + cls.encode("utf-8", "replace")
++                                 + b"\n")
++                except OSError:
++                    return False
++    finally:
++        proc.terminate()
++        proc.wait()
++    return True
++
++
++def niri_focus_update(line, apps, focused):
++    """Apply one event-stream line to (app_id by window id, focused id)."""
++    (kind, ev), = json.loads(line).items()
++    if kind == "WindowsChanged":
++        apps = {w["id"]: w.get("app_id") or "" for w in ev["windows"]}
++        focused = next((w["id"] for w in ev["windows"]
++                        if w.get("is_focused")), None)
++    elif kind == "WindowOpenedOrChanged":
++        w = ev["window"]
++        apps[w["id"]] = w.get("app_id") or ""
++        if w.get("is_focused"):
++            focused = w["id"]
++    elif kind == "WindowClosed":
++        apps.pop(ev["id"], None)
++        if focused == ev["id"]:
++            focused = None
++    elif kind == "WindowFocusChanged":
++        focused = ev["id"]
++    return apps, focused
++
++
+ def report_focus(sock, stop):
      """Push focus changes to the daemon until the connection dies."""
++    if WAYLAND and NIRI:
++        # Restart the stream if niri restarts, until the connection ends.
++        while follow_niri_focus(sock, stop) and not stop.wait(2):
++            pass
++        return
      if not FOCUS_TOOL:
          log.warning("%s not found; app blacklist will be inactive",
--                    "kdotool" if WAYLAND else "xprop")
-+                    ("niri" if NIRI else "kdotool") if WAYLAND else "xprop")
-         return
-     last = None
-     while not stop.is_set():
-@@ -294,6 +310,74 @@
+                     "kdotool" if WAYLAND else "xprop")
+@@ -294,6 +364,74 @@
          cr.set_line_width(1.5)
          cr.stroke()
  
@@ -147,7 +176,7 @@
      def make_ghost_drawer(cursor):
          """Draw function for the ghost: your own pointer if we have it."""
          def draw(_area, cr, width, height, *_data):
-@@ -324,29 +408,31 @@
+@@ -324,29 +462,31 @@
                           LayerShell.Edge.LEFT, LayerShell.Edge.RIGHT):
                  LayerShell.set_anchor(self.win, edge, True)
  
@@ -198,7 +227,7 @@
              self.win.set_child(self.fixed)
  
              css = Gtk.CssProvider()
-@@ -372,7 +458,42 @@
+@@ -372,7 +512,42 @@
          def _make_click_through(self, *_):
              surface = self.win.get_surface()
              if surface is not None:
@@ -242,7 +271,7 @@
  
          def _check_stale(self):
              """Watchdog for the two ways this could go wrong.
-@@ -400,10 +521,14 @@
+@@ -400,10 +575,14 @@
              self.active = active
              self.seq += 1
              if not active:
@@ -257,7 +286,7 @@
              # The pointer is pinned for the whole drag, so one query does.
              try:
                  proc = Gio.Subprocess.new(
-@@ -461,8 +586,8 @@
+@@ -461,8 +640,8 @@
              if self.anchor is None:
                  return
              ax, ay = self.anchor
@@ -268,7 +297,7 @@
              gx, gy = ax + self.offset[0], ay + self.offset[1]
              if self.geo is not None:
                  # Windows stops the cursor at the screen edge; so do we.
-@@ -472,6 +597,7 @@
+@@ -472,6 +651,7 @@
              # places the real one, so the ghost points at the same pixel.
              self.fixed.move(self.ghost, gx - self.hotspot[0],
                              gy - self.hotspot[1])
