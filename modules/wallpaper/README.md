@@ -3,8 +3,14 @@ that steamapps/common/wallpaper_engine/assets exists, and the wanted wallpapers
 are downloaded under steamapps/workshop/content/431960.
 
 Launch WPE Gallery to choose an installed wallpaper and a connected display.
-It writes ~/.config/linux-wallpaperengine/assignments.json and restarts the
-linux-wallpaperengine user unit. Each output keeps its own wallpaper; the launcher
+It writes ~/.config/linux-wallpaperengine/assignments.json and reloads the
+linux-wallpaperengine user unit: wpe-gallery-launch stays running as the
+renderer supervisor, starts the re-verified renderer first and kills the old
+one once the new one presents, so the desktop never shows the bare background
+in between. Video wallpapers still draw black until their first decoded frame.
+The unit and wpe-gallery-launch must come from the same release (reload needs a
+launcher newer than 0.2.4). wallpaper.env is read on start only: restart the
+unit after editing it. Each output keeps its own wallpaper; the launcher
 builds one renderer invocation with repeated --screen-root / --bg pairs.
 WPE_FPS from wallpaper.env and fullscreen pause behaviour are preserved.
 Per-wallpaper properties are reserved until the renderer supports their scope.
