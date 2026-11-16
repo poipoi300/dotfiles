@@ -77,22 +77,27 @@ or secrets, include a security review.
 
 ## GUI testing
 
-Never test GUI behaviour in the user's live desktop session: don't open test windows on their
-outputs, restart their shell/bar/dock services, or drive their pointer. Run the app under its own
-compositor instance with its own `WAYLAND_DISPLAY` (and `NIRI_SOCKET` when relevant), export those
-only to the processes under test, and tear the instance down afterwards. Pick the backend by what
-the test needs:
+Nothing an agent tests may appear on the user's screens or play through their speakers. Never open
+test windows in the live session, restart their shell/bar/dock services, or drive their pointer.
+Run the app under a compositor instance of your own, export its `WAYLAND_DISPLAY` (and
+`NIRI_SOCKET` when relevant) only to the processes under test, and tear it down afterwards:
 
-- Headless, nothing on screen (default): `WLR_BACKENDS=headless WLR_RENDERER=gles2 sway -c <scratch
-  config>` (`pixman` renderer if no GPU path); add outputs with `swaymsg create_output` and set their
-  mode; capture with `grim`. Supports layer-shell, so it fits bars, docks and wallpapers.
-- niri-specific behaviour (niri IPC, window rules, its layout): a nested `niri -c <scratch config>
-  -- <cmd>`, never with `--session`. It opens as one window in the user's session, so warn the user
-  first and keep it short.
-- Plain app windows with no compositor-specific needs: either of the above, or `cage` for one window.
+- Default: headless sway. Start it with `WAYLAND_DISPLAY=` unset and
+  `WLR_BACKENDS=headless WLR_RENDERER=gles2 sway -c <scratch config>` (`pixman` without a GPU
+  path); set outputs in that config (`output HEADLESS-1 mode 1920x1080`) or with `swaymsg`;
+  capture with `grim`. Supports layer-shell, so it fits bars, docks and wallpapers.
+- niri-specific behaviour (niri IPC, window rules, its layout): run a nested
+  `niri -c <scratch config> -- <cmd>` INSIDE that headless sway (never with `--session`, never
+  directly in the user's session). The nested niri stays on sway's invisible output.
+- One plain window: `cage` with the same headless environment works too.
 
-Real hardware or session services (audio devices, the user's wallpaper unit) may be touched only when
-the test requires it; record the original state and restore it. Report screenshots by path.
+Audio: test apps must not reach real devices. Create a temporary virtual sink
+(`pactl load-module module-null-sink sink_name=agent-test`; unload it afterwards) and point the
+processes at it (`PULSE_SINK=agent-test`, or the app's own output option), or disable audio in the
+app. Audio effects and presets are tested on that virtual sink too, never on the user's devices.
+
+Touch real session services (e.g. the user's wallpaper unit) only when the test can't run without
+them; record the original state, keep it brief and restore it. Report screenshots by path.
 
 ## Shell and links
 
