@@ -93,7 +93,8 @@ skill's `metadata.source`, license copied beside it): `file-pr`, `babysit-pr` (w
 that head and exits 1 when a Greptile or Macroscope check fails; `babysit-pr`
 treats a watcher exit as news, checks full-send's merge gate live (paginated
 threads and the user's own comments), owns the untrusted-data rule, and does
-not fix or push on a watch-only request; `full-send` checks usage, keeps the
+not fix or push on a watch-only request, and caps bot-fix rounds at the
+review-loop budget; `full-send` checks usage, keeps the
 live desktop forbidden, defines that merge gate (confirmed absence of CI, only
 `CLEAN` or `HAS_HOOKS`, every check run, no unresolved threads,
 bots judged from recent PRs), keeps auto-merge off until that gate passes, and
@@ -103,8 +104,9 @@ gate without merging; `sol-loop` follows `agent-roles` review loops, restarts a
 failed or silent reviewer once, can fall back to another model family or a
 disclosed same-family `reviewer`, and names that reviewer above `file-pr`'s
 model line; `leaving-pr-comments` points at `babysit-pr` for untrusted data and
-attributes comments to the user's GitHub login only; `file-pr`'s model line
-replaces harness attribution. Compare against upstream before updating.
+attributes comments to the user's GitHub login only; `file-pr` pushes before
+filing and its model line replaces harness attribution. Compare against
+upstream before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 

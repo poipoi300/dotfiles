@@ -132,6 +132,12 @@ source before changing code. Fix real findings and CI failures, distinguish
 repository failures from infrastructure flakes, and reply with a written
 reason when dismissing false positives.
 
+Bot findings use the round budget in `agent-roles` "Review loops", including
+its extension rule. A round is one push that answers bot findings. When the
+budget is spent with a bot blocker or should still open or disputed, stop
+fixing and ask the user (under full-send or full-stop, follow full-send
+"Asking the user").
+
 CodeRabbit is advisory, as in full-send's merge gate. Treat its findings like
 any other finding, but never wait for it and never hold a merge for it.
 

@@ -146,6 +146,7 @@ Ask only when you cannot continue alone:
 - You cannot prove the change.
 - The reviewer cannot be started.
 - The merge gate cannot pass, and you cannot fix that yourself.
+- A review-loop or bot-fix budget runs out with a blocker or should open.
 - The next step is outside the grant above: deleting data, touching production,
   changing things outside the repo, closing a PR, or force-pushing any other
   branch.
