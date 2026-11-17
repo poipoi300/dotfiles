@@ -17,8 +17,9 @@ models/options from live capabilities only when selection is needed. Honor
 explicit user settings and unavailable-provider errors. Use T3-managed
 worktree isolation when required; never make a checkout in the task prompt.
 Fresh reviews receive the raw scope and evidence without the author's framing.
-Every T3 re-review is a fresh delegated task. A worker must not delegate again
-unless its task explicitly asks it to.
+Every T3 `delegate_task` re-review is a fresh task; native reviewers follow
+agent-roles "Review loops". A worker must not delegate again unless its task
+explicitly asks it to.
 
 In Codex, the generated custom agents in `~/.codex/agents` read the same briefs;
 spawn them by name when authorized by the current task. If delegation is unavailable or prohibited, perform permitted work

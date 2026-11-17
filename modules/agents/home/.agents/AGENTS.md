@@ -87,7 +87,8 @@ Respect each repository's check scope and commit policy. Before committing
 completed feature work, get an independent review, always from the relevant
 subagent type. GPT is usually good for harsh technical and math critiques. For
 ML changes, include data and experiment sanity checks; for auth, input handling,
-or secrets, include a security review.
+or secrets, include a security review. When you re-review fixes, follow
+"Review loops" in `~/.agents/skills/agent-roles/SKILL.md`.
 
 ## GUI testing
 

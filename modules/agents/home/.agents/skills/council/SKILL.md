@@ -27,8 +27,8 @@ and aggregation rule before collecting reviews. Keep these stable across rounds.
 When the user asks for a council review of code, the caller first fixes known
 issues, addresses open PR comments, and runs the relevant checks, so reviewers
 judge the current implementation rather than defects already known. Skip fixes
-to code the user wants replaced. Inside Hillclimb, such a fix is a new
-candidate and counts as a round.
+to code the user wants replaced. Inside Hillclimb, evaluate the baseline
+unchanged; known fixes become the first round.
 
 For code and feature reviews, include the intended behavior, diff and surrounding
 code, relevant contracts, and available check results. Assign coverage for
