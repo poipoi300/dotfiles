@@ -1,11 +1,12 @@
-description = "Hardware tools: RGB, mouse, fans, sensors, disks, webcam, UPS"
+description = "Hardware tools: RGB, keyboard firmware, fans, sensors, disks, webcam, UPS"
 category    = "system"
 
 [packages]
 pacman = ["openrgb", "coolercontrol", "lm_sensors", "nvtop", "cpu-x", "smartmontools",
           "gsmartcontrol", "kdiskmark", "cameractrls", "v4l-utils", "nut", "gdu", "ipmitool",
-          "piper"]   # gaming mouse buttons, DPI and LEDs (libratbag)
-aur    = ["opentabletdriver"]
+          "qmk"]   # keyboard firmware: build and flash; ships the bootloader udev rules
+aur    = ["opentabletdriver",
+          "via-bin"]   # VIA keymap editor; the keyboard's hidraw access is system/etc/udev/rules.d/60-via.rules
 
 [units]
 system = ["coolercontrold.service"]

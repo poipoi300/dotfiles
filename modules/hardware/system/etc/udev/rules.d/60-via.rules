@@ -1,0 +1,3 @@
+# VIA and QMK's raw HID: give the logged-in user the keyboard's hidraw nodes.
+# hineybush h87a (QMK, VIA support).
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="ece9", TAG+="uaccess"
