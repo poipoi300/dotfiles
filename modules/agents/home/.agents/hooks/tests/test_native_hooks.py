@@ -109,6 +109,18 @@ class NativeHookTests(unittest.TestCase):
             output = native.dispatch("codex", self.payload())
             self.assertEqual(output["hookSpecificOutput"]["additionalContext"], "usage survives")
 
+    def test_usage_failure_preserves_design_and_gives_agent_a_refresh_command(self):
+        for provider in ("claude", "codex"):
+            with patch.object(native, "ROOT", self.directory), \
+                 patch.object(behavior, "design_hook", return_value={"hookSpecificOutput": {
+                     "hookEventName": "SessionStart", "additionalContext": "design context"}}), \
+                 usage(startup=unittest.mock.Mock(side_effect=OSError("PRIVATE"))):
+                output = native.dispatch(provider, self.payload())["hookSpecificOutput"]
+                self.assertTrue(output["additionalContext"].startswith("design context\n"))
+                self.assertIn("UNKNOWN", output["additionalContext"])
+                self.assertIn("python3 -I -B ~/.agents/usage/budget.py --refresh", output["additionalContext"])
+                self.assertNotIn("PRIVATE", json.dumps(output))
+
     def test_project_design_hook_takes_precedence_for_each_provider(self):
         for provider, relative in (("claude", ".claude/settings.local.json"), ("codex", ".codex/hooks.json")):
             path = self.directory / relative

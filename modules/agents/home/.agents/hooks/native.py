@@ -39,7 +39,11 @@ def dispatch(provider: str, payload: dict) -> dict:
     except (OSError, ValueError, subprocess.TimeoutExpired):
         output = {"systemMessage": "Impeccable native hook unavailable; use the skill's manual detector fallback."}
     if event == "SessionStart" and budget is not None and not os.environ.get("WPO_SESSION"):
-        context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+        try:
+            context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
+            context = ("Usage is UNKNOWN; native snapshot unavailable. Manual refresh: "
+                       "python3 -I -B ~/.agents/usage/budget.py --refresh")
         specific = output.setdefault("hookSpecificOutput", {"hookEventName": event})
         specific["additionalContext"] = "\n".join(filter(None, [specific.get("additionalContext"), context]))
     return output

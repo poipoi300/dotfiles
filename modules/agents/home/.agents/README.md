@@ -160,6 +160,15 @@ The Impeccable design hook runs the engine from `$IMPECCABLE_BIN`, the binary be
 
 `usage/budget.py` (private module) reports only supported observed usage and explicit
 unknown/stale state; without it the hooks simply add no usage context and the Claude
-statusLine is not registered. WPO's separate routing usage adapter
+statusLine is not registered. SessionStart reads Claude's native `get_usage` control
+request and Codex's `account/rateLimits/read` through temporary stdio processes, with
+hooks/MCP disabled for the Claude probe and no model prompts. It needs no running
+Codex daemon or visible Claude status line. Hook reads cache for five minutes;
+`python3 -I -B ~/.agents/usage/budget.py --refresh` forces fresh provider reads and is
+also documented in AGENTS.md for hosts that do not deliver SessionStart context.
+The same snapshot includes Grok's subscription billing percentage and reset time using
+its existing default native login. That token goes only to Grok's fixed HTTPS billing
+endpoint, without redirects or token refreshes; custom Grok auth/endpoints report unknown.
+WPO's separate routing usage adapter
 (`~/.claude/hooks/usage_budget.py`) is a distinct integration: it reads the Claude Code and
 CLIProxyAPI OAuth token files and queries only api.anthropic.com and chatgpt.com.
