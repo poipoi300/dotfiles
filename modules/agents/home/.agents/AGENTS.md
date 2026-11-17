@@ -22,17 +22,33 @@ When a task or decision is waiting on information or state that doesn't exist ye
 (a PR merge, CI, a release, a reply, a job finishing), don't end with an offer
 such as "once X, I can Y". For checks and reviews on a PR you are babysitting,
 use babysit-pr's watcher instead of `schedule_task`. Commit to the conditional
-action and schedule a T3 thread (`schedule_task`) for when that state can
-reasonably be expected. Its prompt must stand on its own: what to check, what
-to do if the condition holds, and to reschedule or report if it doesn't. That
-lets the current thread be settled while nothing is left implicit. A wrong
-guess is cheap because the user can cancel the scheduled task. State the
-condition, the action, and the delay:
+action and schedule it (`schedule_task`, bound to the current thread) for when
+that state can reasonably be expected. A wrong guess is cheap because the user
+can cancel the task. Then snooze the thread (`t3_thread_organize`) until the
+next run, so it leaves the user's list and comes back on its own if a run
+never fires. The next run is the earliest future run among the enabled tasks
+bound to the thread. State the condition, the action, the delay, and the
+snooze:
 
 - Wrong: "Once #2 and #4 are merged, I can reset your fork's `master` to
   upstream so they match again."
 - Right: "If #2 and #4 merge, I'll reset your fork's `master` to upstream so
-  they match again. Thread scheduled in 2 days."
+  they match again. Scheduled here for Wednesday; thread snoozed until then."
+
+The task's prompt must stand on its own: what to check, what to do if the
+condition holds, and how each run ends:
+
+- Done: brief the user, then snooze the thread until the next run, or
+  unsnooze and settle it if none is left.
+- Not yet (nothing failed, the state just doesn't exist yet): re-arm the same
+  task (`scheduledTaskId`) for a later time, snooze until the next run, and
+  say so in one line. After about five re-arms, or once the wait is clearly
+  overdue, stop re-arming and ask.
+- Failed, blocked, or needs the user: brief them, then unsnooze and unsettle
+  the thread so it stays in their list.
+
+Never snooze or settle over a problem, including one an earlier run in the
+thread reported that the user hasn't answered yet.
 
 ## Correctness
 
