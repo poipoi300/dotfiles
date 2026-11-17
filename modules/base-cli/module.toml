@@ -8,7 +8,7 @@ pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7
           "fwupd",              # firmware from LVFS: fwupdmgr refresh, then fwupdmgr update
           "fd", "dust", "tealdeer", "magic-wormhole",   # tealdeer: tldr; magic-wormhole: send a file with a short code
           "git-delta"]          # git's pager (.gitconfig)
-aur    = ["yay"]
+aur    = ["yay"]   # until every AUR package is adopted by aurlock (modules/aurlock/README.md)
 
 [units]
 system = ["fstrim.timer", "systemd-timesyncd.service", "paccache.timer"]   # paccache: keep 3 versions, weekly

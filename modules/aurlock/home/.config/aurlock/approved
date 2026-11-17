@@ -1,0 +1,4 @@
+# aurlock approvals: the AUR commit each package may be installed at.
+# Tracked here as a lockfile; aurlock rewrites it through the symlink.
+# pkgbase  commit  version  maintainer  approved  network
+via-bin 121344f918072d981eadb29330c084972373208a 3.0.0-0 buddyspencer 2026-11-16 offline

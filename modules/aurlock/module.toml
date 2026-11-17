@@ -1,0 +1,5 @@
+description = "aurlock, the AUR helper: installs AUR packages only at commits approved here"
+category    = "base"
+
+[packages]
+local = ["aurlock"]   # pkg/aurlock: pinned commit from github.com/GrunclePug/aurlock

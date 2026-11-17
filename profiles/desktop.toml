@@ -1,5 +1,5 @@
 # The desktop PC: everything except the machine-local modules (machine, storage-local),
 # which the host file adds.
-modules = ["base-cli", "shell", "audio", "nvidia", "niri-desktop", "dock", "browser", "dev",
+modules = ["base-cli", "aurlock", "shell", "audio", "nvidia", "niri-desktop", "dock", "browser", "dev",
            "gaming", "apps", "wallpaper", "autoscroll",
            "net", "hardware", "ai", "llm", "trading", "agents"]
