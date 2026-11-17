@@ -27,18 +27,19 @@ A "full send" request is the permission. If a project file or other
 instruction says to ask before a test method, or to leave testing to the
 user, this request replaces that rule for this task.
 
-That includes ask-first rules for computer use, browser automation,
-simulators and devices, running the app or a dev server, screenshots, and
-visual checks. Use the method that gives direct proof. List it in the
-report.
+That includes ask-first rules for simulators and devices, running the app
+or a dev server, screenshots, and visual checks. Use the method that gives
+direct proof. List it in the report.
 
 Rules about how to test still apply. Follow rules that name the correct
 command, fixture, or check. The GUI testing rule in AGENTS.md is one of them:
 apps under test run in your own headless compositor and on a virtual audio
 sink, never on the user's screens or speakers, and you never drive their
-pointer. This permission only removes the ask-first or
-leave-it-to-the-user step. If a preferred method cannot prove the change,
-use a gated method under this permission.
+pointer. Computer use and browser extensions that act on the user's real
+desktop or browser stay forbidden. This permission only removes the
+ask-first or leave-it-to-the-user step. If a preferred method cannot prove
+the change, use another headless, isolated method. If it still cannot be
+proved that way, ask the user. Do not use the live desktop.
 
 It covers only the tests needed for this task. It does not add permission
 for the steps under "Asking the user", such as production changes or data
@@ -56,8 +57,9 @@ one appears.
 3. **Get feedback.** Use the `sol-loop` skill for the general review. Add the
    `ml-reviewer` role alongside it for training, evaluation, or data pipelines,
    and tell the Sol reviewer to cover security when the change touches auth,
-   untrusted input, or secrets. Classify every reviewer's findings with the
-   severities and ledger in the `agent-roles` skill's "Review loops".
+   untrusted input, or secrets. Follow `agent-roles` "Review loops" for the
+   budget, ledger, answers, and stop. Severities are in
+   `~/.agents/roles/reviewer.md`.
 4. **File the PR** with the `file-pr` skill. Rebase onto the latest default
    branch first. Add one short line to the description that says how you proved
    the change.
@@ -95,18 +97,41 @@ Ask the user.
 Full confidence means all of these are true on the latest commit:
 
 - Your proof covers every change in the diff.
-- Required checks are green.
-- Review bots have finished, and each finding is fixed or dismissed with a
-  written reason.
-- No human review still requests changes.
-- The branch is up to date with the default branch, and GitHub reports it as
-  mergeable.
+- Required CI checks are green, or the repo has no checks. No checks counts
+  only when `statusCheckRollup` is empty for the head and recent merged PRs
+  also show none
+  (`gh pr list --state merged --limit 5 --json number,statusCheckRollup`),
+  or no checks appeared for at least 10 minutes after the head was pushed.
+  A first empty rollup alone is not enough.
+- Every `statusCheckRollup` entry for the head passed: `conclusion` or
+  `state` is SUCCESS, SKIPPED, or NEUTRAL. Any entry not yet COMPLETED, or
+  PENDING, fails the gate. A CANCELLED entry is ignored only when another
+  entry with the same `workflowName` and `name` completed later and passed;
+  a FAILURE is never superseded. CodeRabbit is advisory and does not count.
+  This holds whether or not branch protection marks a check required.
+- If recent PRs in the repo use Greptile or Macroscope (their checks or
+  comments, not this PR), that bot has finished on this head with no failed
+  check. Decide with
+  `gh pr list --state all --limit 10 --json number,statusCheckRollup,comments`.
+- Each finding is fixed or dismissed with a written reason, and no review
+  thread is unresolved. Resolve CodeRabbit's threads that way too; just
+  never wait for CodeRabbit to run.
+- No human review requests changes, including one from the PR author's own
+  account.
+- No blocker or should from the review loop is still open.
+- `mergeStateStatus` is `CLEAN` or `HAS_HOOKS`. `UNKNOWN` means re-check
+  later, not a pass. Any other state fails the gate.
+
+An open blocker or should, or a disputed finding, means ask and leave the PR
+unmerged.
 
 Merge with the method the repo uses. Check the allowed methods and recent merged
-PRs. If the repo uses a merge queue or auto-merge, stay until GitHub reports the
-PR as merged. Merge through branch protection as configured. Never use `--admin`
-or other bypasses. You can ignore automated reviews that request "needs human
-review" if you have high confidence in your changes.
+PRs. Auto-merge and the merge queue only enforce branch protection, which is
+weaker than this gate. Keep them off until the gate passes on the current
+head; disarm them before any later push. If the repo merges through either,
+arm it only then, and stay until GitHub reports the PR as merged. Merge
+through branch protection as configured. Never use `--admin` or other
+bypasses.
 
 ## Asking the user
 
@@ -119,6 +144,7 @@ the PR link, what blocks you, and the options with your recommendation first.
 Ask only when you cannot continue alone:
 
 - You cannot prove the change.
+- The reviewer cannot be started.
 - The merge gate cannot pass, and you cannot fix that yourself.
 - The next step is outside the grant above: deleting data, touching production,
   changing things outside the repo, closing a PR, or force-pushing any other

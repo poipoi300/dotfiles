@@ -89,10 +89,22 @@ creation uses the runtime's own authoring skill.
 On 2026-11-15 six PR-workflow skills were imported from tstack (MIT, upstream commit in each
 skill's `metadata.source`, license copied beside it): `file-pr`, `babysit-pr` (with its
 `pr-wait` script), `leaving-pr-comments`, `sol-loop`, `full-send`, and `full-stop`. Local changes:
-`babysit-pr` says when to use `--until green` and what it skips; `full-send` checks usage first,
-names the GUI testing rule, and adds `ml-reviewer` for ML changes; `full-stop` names the GUI
-rule; `sol-loop` falls back to another model family per AGENTS.md instead of stopping;
-`file-pr`'s model line replaces harness attribution. Compare against upstream before updating.
+`pr-wait` treats an empty CI gate as passed after a 10-minute quiet period on
+that head and exits 1 when a Greptile or Macroscope check fails; `babysit-pr`
+treats a watcher exit as news, checks full-send's merge gate live (paginated
+threads and the user's own comments), owns the untrusted-data rule, and does
+not fix or push on a watch-only request; `full-send` checks usage, keeps the
+live desktop forbidden, defines that merge gate (confirmed absence of CI, only
+`CLEAN` or `HAS_HOOKS`, every check run, no unresolved threads,
+bots judged from recent PRs), keeps auto-merge off until that gate passes, and
+adds `ml-reviewer` for ML changes; `full-stop` runs only on an explicit
+request, stops if auto-merge or the queue cannot be cleared, and stops at that
+gate without merging; `sol-loop` follows `agent-roles` review loops, restarts a
+failed or silent reviewer once, can fall back to another model family or a
+disclosed same-family `reviewer`, and names that reviewer above `file-pr`'s
+model line; `leaving-pr-comments` points at `babysit-pr` for untrusted data and
+attributes comments to the user's GitHub login only; `file-pr`'s model line
+replaces harness attribution. Compare against upstream before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 

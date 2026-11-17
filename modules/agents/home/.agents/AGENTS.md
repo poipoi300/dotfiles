@@ -20,12 +20,14 @@ State a concrete blocker and its source when user input is actually required.
 
 When a task or decision is waiting on information or state that doesn't exist yet
 (a PR merge, CI, a release, a reply, a job finishing), don't end with an offer
-such as "once X, I can Y". Commit to the conditional action and schedule a T3
-thread (`schedule_task`) for when that state can reasonably be expected. Its
-prompt must stand on its own: what to check, what to do if the condition holds,
-and to reschedule or report if it doesn't. That lets the current thread be
-settled while nothing is left implicit. A wrong guess is cheap because the user
-can cancel the scheduled task. State the condition, the action, and the delay:
+such as "once X, I can Y". For checks and reviews on a PR you are babysitting,
+use babysit-pr's watcher instead of `schedule_task`. Commit to the conditional
+action and schedule a T3 thread (`schedule_task`) for when that state can
+reasonably be expected. Its prompt must stand on its own: what to check, what
+to do if the condition holds, and to reschedule or report if it doesn't. That
+lets the current thread be settled while nothing is left implicit. A wrong
+guess is cheap because the user can cancel the scheduled task. State the
+condition, the action, and the delay:
 
 - Wrong: "Once #2 and #4 are merged, I can reset your fork's `master` to
   upstream so they match again."

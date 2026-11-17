@@ -10,20 +10,25 @@ Progress and errors that do not end the run go to stderr.
 
 --until
   green       required checks passed on the current head (every CI check when
-              the base branch requires none)
-  ready      green, Greptile or Macroscope reviewed the current head, and no
-              review thread is unresolved (default)
+              the base branch requires none). No CI checks counts as passed
+              after that head stays empty for EMPTY_GATE_SECONDS; the line
+              says "no CI checks".
+  ready       green, plus Greptile or Macroscope reviewed the current head
+              with no failed gating check, and no review thread is unresolved
+              (default)
   any-change  stop after the first poll that prints an event
 
 Exit codes
   0  the --until condition is met, or the PR merged
-  1  the condition cannot be met without action: a required check failed, the
-     branch conflicts with its base, the PR closed, `ready` is blocked by
-     unresolved threads or a BEHIND branch, or GitHub stayed unreachable
+  1  the condition cannot be met without action: a required check failed, a
+     Greptile or Macroscope check failed, the branch conflicts with its base,
+     the PR closed, `ready` is blocked by unresolved threads or a BEHIND
+     branch, or GitHub stayed unreachable
   2  bad arguments, unknown PR, or another pr-wait already watches this PR
 
 Events
-  - a required check failed (name and link)
+  - a required check failed, or a Greptile or Macroscope check failed (name
+    and link)
   - all checks finished on the head (one summary line)
   - a new comment, review, thread, or thread reply from someone other than the
     PR author or the gh user
@@ -67,6 +72,9 @@ STATE_DIR = Path.home() / ".local" / "state" / "pr-wait"
 # A state file older than this describes an old session. Start a fresh baseline
 # instead of replaying hours of comments as new events.
 STALE_STATE_SECONDS = 6 * 3600
+# An empty CI gate counts only after the same head has stayed empty this long,
+# from the first poll where this watcher saw that head with no checks.
+EMPTY_GATE_SECONDS = 10 * 60
 MAX_FAILED_POLLS = 10
 TRANSIENT = re.compile(
     r"HTTP (5\d\d|429)|rate limit|timed? ?out|connection (reset|refused)|EOF|"
@@ -259,6 +267,8 @@ class Watcher:
         self.events = 0
         self.required: set[str] | None = None
         self.prev_snapshot: list[tuple[str, str]] | None = None
+        self.snapshot_head: str | None = None
+        self.empty_since: dict[str, float] = {}
         self.pr_files: dict[str, set[str]] = {}
 
     def load(self) -> Json | None:
@@ -378,12 +388,26 @@ class Watcher:
                 self.emit(f"fail:{head}:{name}:{link}", fail_lines[-1])
         watched = {name: c for name, c in checks.items() if bot_name(name) not in ADVISORY_BOTS}
         gate_done = bool(gate) and all(bucket(n) != "pending" for n in gate)
-        all_done = gate_done and all(c["bucket"] != "pending" for c in watched.values())
         # Checks appear a few seconds after a push. Two identical polls in a row
         # guard against calling a half-registered set of checks finished.
+        # The head is part of that identity: an empty poll on the previous head
+        # must not make this head look stable.
+        if head != self.snapshot_head:
+            self.prev_snapshot = None
+            self.snapshot_head = head
         snapshot = sorted((name, c["bucket"]) for name, c in watched.items())
         stable = snapshot == self.prev_snapshot
         self.prev_snapshot = snapshot
+        # An empty gate counts only after this head has had no checks for
+        # EMPTY_GATE_SECONDS, from the first poll that saw it empty.
+        if not gate:
+            now = time.monotonic()
+            started = self.empty_since.setdefault(head, now)
+            if now - started >= EMPTY_GATE_SECONDS:
+                gate_done = True
+        else:
+            self.empty_since.pop(head, None)
+        all_done = gate_done and all(c["bucket"] != "pending" for c in watched.values())
         green = gate_done and stable and not fail_lines
 
         # People and bots talking. Edits are never events.
@@ -426,6 +450,14 @@ class Watcher:
                 done = all(c["bucket"] != "pending" for c in own_checks.values())
             else:
                 done = on_head or any(short in s["body"] for s in summaries)
+            failed = [name for name, c in own_checks.items() if c["bucket"] in FAILED]
+            if bot in GATING_BOTS:
+                for name in failed:
+                    link = own_checks[name]["link"]
+                    if any(name in line and link in line for line in fail_lines):
+                        continue
+                    fail_lines.append(f"gating check failed: {name} {link}")
+                    self.emit(f"fail:{head}:{name}:{link}", fail_lines[-1])
             seen = bool(own_checks or summaries or own_reviews)
             if bot in ADVISORY_BOTS and own_checks:
                 desc = next(iter(own_checks.values()))
@@ -435,9 +467,8 @@ class Watcher:
             key = f"bot:{bot}:{head}"
             was_done = key in self.reported
             if done:
-                if bot in GATING_BOTS:
+                if bot in GATING_BOTS and not failed:
                     reviewed.append(bot)
-                failed = [name for name, c in own_checks.items() if c["bucket"] in FAILED]
                 detail = "; ".join(filter(None, [
                     next((v for v in map(verdict, (s["body"] for s in summaries)) if v), ""),
                     f"failed: {', '.join(failed)}" if failed else "",
@@ -484,7 +515,7 @@ class Watcher:
             + (f" ({', '.join(failed_names)})" if failed_names else ""),
             f"required {sum(bucket(n) in ('pass', 'skipping') for n in self.required)}/{len(self.required)} green"
             if self.required
-            else "",
+            else ("no CI checks" if not gate else ""),
             ", ".join(bot_status[b] for b in GATING_BOTS + ADVISORY_BOTS if b in bot_status)
             or "no Greptile or Macroscope yet",
             f"{len(unresolved)} unresolved threads",
