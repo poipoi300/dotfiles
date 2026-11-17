@@ -71,11 +71,13 @@ and say which one you used. Keep model IDs, pricing snapshots, and deployment
 paths in configuration, not in this file. Do not use legacy proxy shell-out
 routing for native T3 delegation.
 
-Account for usage limits. Before starting a large piece of work, check usage
-manually (the SessionStart hook prints the refresh command). Above 90%, tell the
-user and ask before starting work longer than about an hour of agent time: it may
-fail partway or leave no quota for the rest of the week. Work up to about an hour
-is safe at 90%. If usage cannot be read, say so.
+Use the usage snapshot to choose the model mix: when one provider is nearly
+spent, shift delegates to the providers with headroom. The SessionStart hook
+supplies a snapshot; refresh it with
+`python3 -I -B ~/.agents/usage/budget.py --refresh` before delegating a large
+piece of work. The user tracks usage and sizes requests themselves, so don't
+report usage, warn about it, or ask before starting work because of it. Never
+trade correctness for usage: still search the web, verify, and review.
 
 ## Preferred stack
 
