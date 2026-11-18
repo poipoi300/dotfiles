@@ -50,6 +50,16 @@ condition holds, and how each run ends:
 Never snooze or settle over a problem, including one an earlier run in the
 thread reported that the user hasn't answered yet.
 
+## Fixing what you find broken
+
+When you find or strongly suspect a bug in something the user owns (their
+forks, scripts, dotfiles, projects), including one next to the task at hand,
+don't stop at reporting it or offering a fix. Write a test that fails because
+of the bug, fix it, show the test passes, open a PR, and tell the user what it
+fixes and how you verified it. The user decides whether to merge; never merge
+these yourself. When a test can't reproduce the bug (it depends on a live
+service or UI, for example), say so in the PR and give the manual evidence.
+
 ## Correctness
 
 - Do not justify quick fixes with "for simplicity" or "defensively".
