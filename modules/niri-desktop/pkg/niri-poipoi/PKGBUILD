@@ -1,12 +1,18 @@
-# niri with hide-cursor / show-cursor IPC actions, used by midscroll's overlay (autoscroll module)
-# to hide the pointer during autoscroll. Otherwise Arch's extra/niri recipe, built from the same
-# release tarball and checksums. `check()` is left out: the test suite runs single-threaded for a
-# long time and the patch only adds two actions. Bump pkgver with Arch's niri and re-apply the patch.
+# niri with two additions on top of Arch's extra/niri recipe:
+# - hide-cursor / show-cursor IPC actions (hide-cursor.patch), used by midscroll's overlay
+#   (autoscroll module) to hide the pointer during autoscroll.
+# - virtual outputs from upstream PR #3800 (https://github.com/niri-wm/niri/pull/3800,
+#   `niri msg create-virtual-output`), used as a Sunshine streaming display. The PR is based on
+#   main after v26.04 and conflicts with the v26.04 tag, so this builds the PR's head commit from
+#   niri-wm/niri's own archive, pinned by commit and checksum. When the PR merges and a release
+#   carries it, go back to the release tarball.
+# `check()` is left out: the test suite runs single-threaded for a long time.
 pkgname=niri-poipoi
 _pkgname=niri
-pkgver=26.04
+_commit=7fd585dd44ed67644977dd9561bb6e8b3837f8f7  # PR #3800 head: v26.04 + 138 main commits + PR
+pkgver=26.04.r139.g7fd585d
 pkgrel=1
-pkgdesc="A scrollable-tiling Wayland compositor (with hide-cursor/show-cursor actions)"
+pkgdesc="A scrollable-tiling Wayland compositor (with hide-cursor actions and virtual outputs)"
 arch=(x86_64)
 url="https://github.com/niri-wm/niri"
 license=(GPL-3.0-or-later)
@@ -25,22 +31,22 @@ optdepends=(
   'xdg-desktop-portal-gtk: a suggested XDG desktop portal'
   'xdg-desktop-portal-gnome: a XDG desktop portal required for screencasting'
 )
-provides=("niri=$pkgver" wayland-compositor)
+provides=("niri=26.04" wayland-compositor)
 conflicts=(niri)
-source=("$_pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"
+source=("$_pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz"
         hide-cursor.patch)
-sha512sums=('ae30446fbf529155907726cf2cba7402bcfc5be2032370d66f9f980efb257f29353b47d495f1218b81ac32c643f15bbb74834dc35882849a4479021b4b9fa97f'
+sha512sums=('4e543ec0a0017c0c64c6b20c3d46debc02c8bfa58c01cbd72fbf4cf422ad04503588d5f31264acf0ea0f5cf1c12759f1c8bdc975d6c7605d59e3c1ec85125d30'
             '5fb3263f39ac9b3d2328737e803dd7489b067ff650ca6b2d0b2c53588d602a700efcb0b8b888f7ff86c22955177447c02205eb763b83b4fd143341c14a679d63')
 
 prepare() {
-  cd $_pkgname-$pkgver
+  cd $_pkgname-$_commit
   patch -p1 < "$srcdir/hide-cursor.patch"
   cargo fetch --locked --target "$(rustc --print host-tuple)"
 }
 
 build() {
-  cd $_pkgname-$pkgver
-  export NIRI_BUILD_COMMIT="$(zcat ../$_pkgname-$pkgver.tar.gz | git get-tar-commit-id | cut -c1-7)"
+  cd $_pkgname-$_commit
+  export NIRI_BUILD_COMMIT="$(zcat ../$_pkgname-$_commit.tar.gz | git get-tar-commit-id | cut -c1-7)"
   CFLAGS+=(' -ffat-lto-objects')
   cargo build --frozen --release --features default
 
@@ -50,12 +56,12 @@ build() {
 }
 
 package() {
-  cd $_pkgname-$pkgver
+  cd $_pkgname-$_commit
   install -vDm 755 {target/release/$_pkgname,resources/$_pkgname-session} -t "$pkgdir/usr/bin/"
   install -vDm 644 resources/$_pkgname{.service,-shutdown.target} -t "$pkgdir/usr/lib/systemd/user/"
   install -vDm 644 resources/$_pkgname.desktop -t "$pkgdir/usr/share/wayland-sessions/"
   install -vDm 644 resources/$_pkgname-portals.conf -t "$pkgdir/usr/share/xdg-desktop-portal/"
-  install -vDm 644 resources/default-config.kdl README.md -t "$pkgdir/usr/share/doc/$_pkgname/"
+  install -vDm 644 resources/default-config.kdl README.md docs/wiki/Virtual-Outputs.md -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -vDm 644 bash-completions "$pkgdir/usr/share/bash-completion/completions/niri"
   install -vDm 644 fish-completions "$pkgdir/usr/share/fish/vendor_completions.d/niri.fish"
   install -vDm 644 zsh-completions "$pkgdir/usr/share/zsh/site-functions/_niri"

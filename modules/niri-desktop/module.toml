@@ -8,7 +8,7 @@ pacman = ["xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-
           "networkmanager", "network-manager-applet", "ghostty", "ttf-firacode-nerd",
           "quickshell", "xdg-utils", "inter-font"]
 aur    = ["dms-shell-bin"]
-local  = ["niri-poipoi"]   # niri + hide-cursor/show-cursor actions (autoscroll)
+local  = ["niri-poipoi"]   # niri + hide-cursor/show-cursor actions (autoscroll) + virtual outputs (PR #3800)
 
 [units]
 system = ["NetworkManager.service", "NetworkManager-dispatcher.service"]
