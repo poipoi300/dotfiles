@@ -1,0 +1,31 @@
+YouTube Music's new player UI (Oct 2026) dropped ytmusic-player-bar, so the
+next/previous buttons the renderer clicked no longer exist and MPRIS/global
+skip did nothing (pear-devs/pear-desktop#4728). Click the legacy button when
+present, otherwise use the player API, as upstream PR #4750 does.
+--- a/src/renderer.ts
++++ b/src/renderer.ts
+@@ -69,14 +69,18 @@
+     );
+ 
+   window.ipcRenderer.on('peard:previous-video', () => {
+-    document
+-      .querySelector<HTMLElement>('.previous-button.ytmusic-player-bar')
+-      ?.click();
++    const button = document.querySelector<HTMLElement>(
++      '.previous-button.ytmusic-player-bar',
++    );
++    if (button) button.click();
++    else api?.previousVideo();
+   });
+   window.ipcRenderer.on('peard:next-video', () => {
+-    document
+-      .querySelector<HTMLElement>('.next-button.ytmusic-player-bar')
+-      ?.click();
++    const button = document.querySelector<HTMLElement>(
++      '.next-button.ytmusic-player-bar',
++    );
++    if (button) button.click();
++    else api?.nextVideo();
+   });
+   window.ipcRenderer.on('peard:play', (_) => {
+     api?.playVideo();
