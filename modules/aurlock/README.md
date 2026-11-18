@@ -16,6 +16,11 @@ Day to day:
     aurlock outdated                      # what's waiting
     aurlock list                          # approvals and untracked AUR packages
 
+`home/.config/aurlock/local` names the own builds from the modules' `pkg/`
+directories; `aurlock list` shows them as local builds and never offers them
+for adoption, even when the AUR has a package of the same name. Add a name
+there when a module gains a `pkg/` directory.
+
 aurlock upgrades only packages it installed. Packages yay installed before the
 switch are adopted once with `aurlock install <pkg>...` (review and rebuild);
 `aurlock list` shows which are still untracked. yay stays in base-cli until

@@ -1,0 +1,21 @@
+# arcus own builds (pkg/ dirs of the dotfiles modules): aurlock lists them as
+# local builds and never offers them for adoption from the AUR.
+antigravity-cli
+aurlock
+cli-proxy-api
+cosmos-cheathappens
+grok-bot
+grok-build
+haruneko
+ibgateway
+impeccable-engine
+kcc
+linux-wallpaperengine-git
+midscroll
+niri-poipoi
+pear-desktop-poipoi
+python-mozjpeg-lossless-optimization
+rtk
+svp
+wpe-gallery
+yt-dlp-firefox-host

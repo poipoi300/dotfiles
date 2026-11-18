@@ -2,8 +2,8 @@
 # GitHub; to update, read the diff, then move _commit and pkgver together
 # (pkgver is VERSION in config.mk at that commit).
 pkgname=aurlock
-pkgver=0.3.2
-_commit=4e38bdb6fe774f5df5affbf62a41a59aaab0ad3a
+pkgver=0.5.0
+_commit=e0e00c71db6cbaf166c52fc1c0485940154796cb
 pkgrel=1
 pkgdesc="A minimal AUR helper that never installs an AUR package at a commit you haven't approved"
 arch=(x86_64)
