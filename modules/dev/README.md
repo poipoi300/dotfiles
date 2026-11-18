@@ -5,3 +5,8 @@ Python is uv-only: every project has a `pyproject.toml` and its own venv (`uv sy
 `uv python install 3.15`. No other system Python packages beyond what other packages pull in.
 
 Rust comes from rustup (`rustup default stable`).
+
+Claude Code is the vendor's native install, not a package: `~/.local/bin/claude` links into
+`~/.local/share/claude/versions/`. It gets releases before the AUR package does, and it updates
+itself (`claude update`; background updates are off via `autoUpdates: false`). This
+self-updating installer is a deliberate exception to the no-self-updaters rule.

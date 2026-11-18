@@ -8,7 +8,7 @@ links = { ".claude/CLAUDE.md" = ".agents/AGENTS.md", ".claude/RTK.md" = ".agents
 # python: sync.py, hooks and tests (3.11+); python-yaml: the test suite only.
 # nodejs/npm: `npx -y <pkg>` MCP servers; uv: `uvx` MCP servers.
 pacman = ["python", "python-yaml", "nodejs", "npm", "uv"]
-# claude-code and openai-codex-bin come from the dev module.
+# openai-codex-bin comes from the dev module; Claude Code is its native install (dev README).
 aur    = []
 # rtk: github.com/rtk-ai/rtk release binary; impeccable-engine: the Impeccable skill's engine.
 local  = ["rtk", "impeccable-engine"]

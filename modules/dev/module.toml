@@ -7,7 +7,8 @@ pacman = ["zed", "docker", "docker-buildx", "docker-compose", "go", "uv", "nodej
           "pnpm", "bun", "rustup", "clang", "llvm", "lld", "lldb", "cmake", "rust-analyzer",
           "pyright", "vulkan-tools", "vulkan-headers", "vulkan-validation-layers", "shaderc",
           "sway", "grim", "cage"]   # sway/cage: isolated (headless) compositors for GUI tests
-aur    = ["opencode-bin", "claude-code", "openai-codex-bin"]
+# claude-code: native self-updating install (~/.local/bin/claude), see README.
+aur    = ["opencode-bin", "openai-codex-bin"]
 
 [units]
 system = ["docker.service", "containerd.service"]
