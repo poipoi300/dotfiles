@@ -9,5 +9,5 @@ pacman = ["discord", "obsidian", "dolphin", "krita", "krita-plugin-gmic", "parti
           "slurp", "displaycal", "argyllcms",
           # file managers on trial (2026-11-17): pick one to fork
           "cosmic-files"]
-aur    = ["sigma-file-manager-bin", "strata-bin", "obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
+aur    = ["strata-bin", "obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
           "solidcraft"]

@@ -2,7 +2,6 @@
 # Tracked here as a lockfile; aurlock rewrites it through the symlink.
 # pkgbase  commit  version  maintainer  approved  network
 via-bin 121344f918072d981eadb29330c084972373208a 3.0.0-0 buddyspencer 2026-11-16 offline
-sigma-file-manager-bin 4a7540e713ebaaac0c960e61865ac00537a3cf8e 2.2.0-1 begin-theadventu 2026-11-17 offline
 strata-bin 29e3683ed6cfafa3deaef58e3d901b09be9c1655 1.2.1-1 tiziodcaio 2026-11-17 offline
 opencode-bin 9153d1031085c902fad3d1b97bd3132faa2a45e2 1.19.6-1 thdxr 2026-11-17 offline
 osu-lazer-bin 8fa0edeb632d6f0bb281018b7633ae792ae83494 2026.1117.0-1 DavidHusicka 2026-11-17 offline
