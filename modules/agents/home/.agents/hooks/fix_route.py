@@ -4,8 +4,11 @@ Routes, first match wins:
 
 - ``agents.route`` is ``direct``, ``upstream``, or ``upstream+carry``
 - a remote named ``upstream`` (local remote-tracking refs only; this never fetches)
-- otherwise GitHub, unless offline: a fork without that remote is an error,
-  anything else (including a failed ``gh`` lookup) is ``direct``
+- otherwise who owns origin. Online, a GitHub fork with no ``upstream`` remote is
+  an error before that. The login comes from ``git config --global
+  agents.githubUser``, else gh's ``hosts.yml``. The user's own repository is
+  ``direct``; anyone else's is ``external``. An unknown login is ``unknown``
+  (the command exits 2; the guard allows it).
 """
 
 from __future__ import annotations
@@ -110,12 +113,100 @@ def urls_equal(left: str, right: str) -> bool:
 
 
 def same_repo(value: str, slug: str) -> bool:
-    """True when ``value`` is ``slug`` or a GitHub URL for it."""
+    """True when ``value`` is ``slug``, ``github.com/owner/repo``, or a GitHub URL for it."""
     candidate = value.strip().removesuffix(".git").rstrip("/")
-    if candidate.lower() == slug.lower():
+    lowered = candidate.lower()
+    for prefix in ("https://github.com/", "http://github.com/", "github.com/"):
+        if lowered.startswith(prefix):
+            candidate = candidate[len(prefix):]
+            lowered = candidate.lower()
+            break
+    if lowered == slug.lower():
         return True
     parsed = github_slug(value)
     return parsed is not None and parsed.lower() == slug.lower()
+
+
+def github_user() -> str | None:
+    """The user's GitHub login, offline.
+
+    ``git config --global agents.githubUser`` wins. Otherwise the ``user:`` entry
+    under ``github.com:`` in gh's ``hosts.yml``. Absence is None, never an error.
+    """
+    configured = _global_git_config("agents.githubUser")
+    if configured:
+        return configured
+    return _hosts_yml_user()
+
+
+def _global_git_config(key: str) -> str | None:
+    try:
+        result = run(["git", "config", "--global", "--get", key])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _hosts_yml_path() -> Path:
+    config_dir = os.environ.get("GH_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir).expanduser() / "hosts.yml"
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".config"
+    return base / "gh" / "hosts.yml"
+
+
+def _hosts_yml_user() -> str | None:
+    path = _hosts_yml_path()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return _parse_hosts_user(text)
+
+
+def _parse_hosts_user(text: str) -> str | None:
+    """``user:`` directly under ``github.com:``. Nested keys, including ``users:``, are ignored."""
+    in_host = False
+    host_indent = 0
+    child_indent: int | None = None
+    for raw in text.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        line = raw.expandtabs(4)
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        name, separator, remainder = stripped.partition(":")
+        if not in_host:
+            if name == "github.com" and separator and _yaml_rest_empty(remainder):
+                in_host = True
+                host_indent = indent
+                child_indent = None
+            continue
+        if indent <= host_indent:
+            break
+        if child_indent is None or indent < child_indent:
+            child_indent = indent
+        if indent != child_indent or name != "user" or not separator:
+            continue
+        login = _unquote_yaml(remainder.strip())
+        return login or None
+    return None
+
+
+def _yaml_rest_empty(remainder: str) -> bool:
+    rest = remainder.strip()
+    return not rest or rest.startswith("#")
+
+
+def _unquote_yaml(value: str) -> str:
+    if " #" in value:
+        value = value.split(" #", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1].strip()
+    return value
 
 
 def _canon(url: str) -> str:
@@ -172,16 +263,25 @@ def local_branch(directory: Path) -> str | None:
 
 
 def push_remote(directory: Path) -> str | None:
-    """Remote a bare ``git push`` would use: branch pushRemote, then branch remote, else origin."""
-    branch = local_branch(directory)
-    if branch:
-        for key in (f"branch.{branch}.pushRemote", f"branch.{branch}.remote"):
-            try:
-                result = git(directory, "config", "--get", key)
-            except (OSError, subprocess.TimeoutExpired):
-                return None
+    """Remote a bare ``git push`` uses.
+
+    Git's order: ``branch.<name>.pushRemote``, ``remote.pushDefault``,
+    ``branch.<name>.remote``, then ``origin``. A git failure is unknown.
+    """
+    try:
+        branch = local_branch(directory)
+        keys: list[str] = []
+        if branch:
+            keys.append(f"branch.{branch}.pushRemote")
+        keys.append("remote.pushDefault")
+        if branch:
+            keys.append(f"branch.{branch}.remote")
+        for key in keys:
+            result = git(directory, "config", "--get", key)
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     return "origin" if remote_url(directory, "origin") else None
 
 
@@ -193,6 +293,16 @@ def route_steps(route: str, origin_default: str, upstream_default: str | None,
             f"Commit on {origin_default}.",
             f"git push origin {origin_default}",
             "Do not open a pull request.",
+        )
+    if route == "external":
+        target = upstream_target or "<origin owner/repo>"
+        return (
+            "git switch -c <branch>",
+            "Commit on that branch.",
+            "git push -u origin HEAD",
+            "If you cannot push, fork the repository and push the branch there.",
+            f"gh pr create --repo {target}",
+            f"Do not push {origin_default}.",
         )
     base = upstream_default or origin_default
     target = upstream_target or "<upstream owner/repo>"
@@ -231,6 +341,7 @@ def decide(directory: Path, *, offline: bool = False) -> Route:
     if upstream is not None:
         route = "upstream+carry" if _ahead(directory) else "upstream"
         return _finish(directory, route, "remotes", origin_repo, upstream)
+    source = "remotes"
     if not offline and origin_repo is not None:
         parent = _fork_parent(origin_repo)
         if parent:
@@ -240,10 +351,24 @@ def decide(directory: Path, *, offline: bool = False) -> Route:
                 code=3,
             )
         if parent is False:
-            branch = _origin_default(directory)
-            return Route("direct", "github", branch, None, origin_repo, route_steps("direct", branch, None, None))
+            source = "github"
+    return _by_owner(directory, origin_repo, source)
+
+
+def _by_owner(directory: Path, origin_repo: str | None, source: str) -> Route:
+    """``direct`` only when origin's owner is the user; anyone else is ``external``."""
+    user = github_user()
+    owner = origin_repo.split("/", 1)[0] if origin_repo else None
+    if not user or not owner:
+        # ``source`` tells main() which hint to print. The guard allows this route.
+        return Route("unknown", "login" if not user else "origin", "", None, origin_repo, ())
     branch = _origin_default(directory)
-    return Route("direct", "remotes", branch, None, origin_repo, route_steps("direct", branch, None, None))
+    if owner.lower() == user.lower():
+        return Route("direct", source, branch, None, origin_repo, route_steps("direct", branch, None, None))
+    return Route(
+        "external", source, branch, None, origin_repo,
+        route_steps("external", branch, None, origin_repo),
+    )
 
 
 def _configured_route(directory: Path) -> str | None:
@@ -273,7 +398,10 @@ def _ahead(directory: Path) -> bool:
             "run git fetch --all, then rerun"
         )
     try:
-        result = git(directory, "rev-list", "--count", f"upstream/{upstream_default}..origin/{origin_default}")
+        result = git(
+            directory, "rev-list", "--count",
+            f"refs/remotes/upstream/{upstream_default}..refs/remotes/origin/{origin_default}",
+        )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RouteError("fix-route: cannot compare origin and upstream; run git fetch --all, then rerun") from error
     if result.returncode != 0:
@@ -285,9 +413,9 @@ def _ahead(directory: Path) -> bool:
 
 
 def _origin_default(directory: Path) -> str:
-    branch = remote_default(directory, "origin") or local_branch(directory)
+    branch = remote_default(directory, "origin")
     if not branch:
-        raise RouteError("fix-route: cannot determine the default branch of origin")
+        raise RouteError("fix-route: default branch unknown; git fetch origin")
     return branch
 
 
@@ -358,6 +486,16 @@ def main(argv: list[str] | None = None) -> int:
     except RouteError as error:
         print(error, file=sys.stderr)
         return error.code
+    if route.route == "unknown":
+        if route.source == "login":
+            print(
+                "fix-route: GitHub login unknown; set it with: "
+                "git config --global agents.githubUser <login>",
+                file=sys.stderr,
+            )
+        else:
+            print("fix-route: cannot tell who owns origin", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(route.as_dict(), ensure_ascii=True))
     else:

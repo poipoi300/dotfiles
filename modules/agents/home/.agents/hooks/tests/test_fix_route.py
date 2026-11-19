@@ -26,10 +26,20 @@ class RepoFixture:
         self.temporary = tempfile.TemporaryDirectory(prefix="fix-route-")
         self.root = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
+        self.gitconfig = self.root / "gitconfig"
+        self.gitconfig.write_text("", encoding="utf-8")
+        self.gh_dir = self.root / "gh"
+        self.gh_dir.mkdir()
+        self.xdg = self.root / "xdg"
+        self.xdg.mkdir()
+        # solo-owner matches the non-fork origin in repository(), so those repos stay direct.
+        self.write_hosts_user("solo-owner")
         self.env = patch.dict(os.environ, {
-            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_GLOBAL": str(self.gitconfig),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GH_CONFIG_DIR": str(self.gh_dir),
+            "XDG_CONFIG_HOME": str(self.xdg),
             "GIT_AUTHOR_NAME": "Route Test",
             "GIT_AUTHOR_EMAIL": "test@example.com",
             "GIT_COMMITTER_NAME": "Route Test",
@@ -79,6 +89,31 @@ class RepoFixture:
             self.git("-C", str(work), "remote", "set-url", "upstream", "https://github.com/upstream-owner/widget.git")
         return work
 
+    def write_hosts_user(self, login: str | None) -> None:
+        path = self.gh_dir / "hosts.yml"
+        if login is None:
+            path.unlink(missing_ok=True)
+            return
+        path.write_text(
+            "github.com:\n"
+            "    users:\n"
+            f"        {login}:\n"
+            "            git_protocol: ssh\n"
+            "    git_protocol: ssh\n"
+            f'    user: "{login}"\n',
+            encoding="utf-8",
+        )
+
+    def set_github_user(self, login: str | None) -> None:
+        if login is None:
+            result = subprocess.run(
+                ["git", "config", "--global", "--unset", "agents.githubUser"],
+                check=False, capture_output=True, text=True, env=os.environ,
+            )
+            self.assertIn(result.returncode, (0, 5), result.stderr)
+            return
+        self.git("config", "--global", "agents.githubUser", login)
+
     def cli(self, directory: Path, *args: str) -> tuple[str, int]:
         stdout, stderr = StringIO(), StringIO()
         with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
@@ -99,6 +134,10 @@ class RouteTests(RepoFixture, unittest.TestCase):
                                              "https://github.com/upstream-owner/widget"))
         self.assertTrue(fix_route.same_repo("upstream-owner/widget", "upstream-owner/widget"))
         self.assertTrue(fix_route.same_repo("https://github.com/upstream-owner/widget.git", "upstream-owner/widget"))
+        self.assertTrue(fix_route.same_repo("github.com/upstream-owner/widget", "upstream-owner/widget"))
+        self.assertTrue(fix_route.same_repo("github.com/upstream-owner/widget.git", "upstream-owner/widget"))
+        self.assertTrue(fix_route.same_repo("https://github.com/Upstream-Owner/widget", "upstream-owner/widget"))
+        self.assertFalse(fix_route.same_repo("github.com/origin-owner/widget", "upstream-owner/widget"))
         self.assertFalse(fix_route.same_repo("origin-owner/widget", "upstream-owner/widget"))
 
     def test_offline_direct_json_and_script(self):
@@ -225,6 +264,117 @@ class RouteTests(RepoFixture, unittest.TestCase):
         with patch.object(fix_route, "run", side_effect=explode):
             timed = fix_route.decide(work, offline=False)
         self.assertEqual(timed.route, "direct")
+
+    def test_direct_requires_the_origin_owner_to_be_the_user(self):
+        work = self.repository(fork=False, name="theirs")
+        self.write_hosts_user("other-person")
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source, route.default_branch), ("external", "remotes", "main"))
+        self.assertEqual(route.origin_repo, "solo-owner/widget")
+        self.assertIsNone(route.upstream_repo)
+        self.assertEqual(route.steps, (
+            "git switch -c <branch>",
+            "Commit on that branch.",
+            "git push -u origin HEAD",
+            "If you cannot push, fork the repository and push the branch there.",
+            "gh pr create --repo solo-owner/widget",
+            "Do not push main.",
+        ))
+        text = route.format_text()
+        self.assertTrue(text.startswith("external\n"), text)
+        self.assertIn("gh pr create --repo solo-owner/widget", text)
+        stdout, code = self.cli(work, "--offline", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout), route.as_dict())
+
+        self.set_github_user("Solo-Owner")
+        self.assertEqual(fix_route.decide(work, offline=True).route, "direct")
+
+    def test_github_user_comes_from_config_then_hosts_yml(self):
+        self.assertEqual(fix_route.github_user(), "solo-owner")
+        xdg_gh = self.xdg / "gh"
+        xdg_gh.mkdir()
+        (xdg_gh / "hosts.yml").write_text("github.com:\n  user: xdg-user\n", encoding="utf-8")
+        self.assertEqual(fix_route.github_user(), "solo-owner")
+        self.write_hosts_user(None)
+        removed = os.environ.copy()
+        removed.pop("GH_CONFIG_DIR", None)
+        with patch.dict(os.environ, removed, clear=True):
+            self.assertEqual(fix_route.github_user(), "xdg-user")
+        self.assertIsNone(fix_route.github_user())
+        nested = (
+            "github.com:\n"
+            "    users:\n"
+            "        nested-login:\n"
+            "            user: not-this\n"
+            "    user: real-login\n"
+            "gitlab.com:\n"
+            "    user: other\n"
+        )
+        (self.gh_dir / "hosts.yml").write_text(nested, encoding="utf-8")
+        self.assertEqual(fix_route.github_user(), "real-login")
+        self.set_github_user("from-config")
+        self.assertEqual(fix_route.github_user(), "from-config")
+
+    def test_unknown_login_exits_2(self):
+        work = self.repository(fork=False, name="no-login")
+        self.write_hosts_user(None)
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source), ("unknown", "login"))
+        stderr, code = self.cli(work, "--offline", "--json")
+        self.assertEqual(code, 2)
+        self.assertIn("git config --global agents.githubUser <login>", stderr)
+        self.assertNotIn('"route"', stderr)
+
+    def test_online_fork_check_precedes_the_owner(self):
+        work = self.repository(fork=False, name="online-fork")
+        self.write_hosts_user("other-person")
+        real = fix_route.run
+        parent = {"isFork": True, "parent": {"nameWithOwner": "upstream-owner/widget"}}
+
+        def wrapped(argv, timeout=5):
+            if argv[:3] == ["gh", "repo", "view"]:
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(parent), stderr="")
+            return real(argv, timeout=timeout)
+
+        with patch.object(fix_route, "run", side_effect=wrapped):
+            stderr, code = self.cli(work)
+        self.assertEqual(code, 3)
+        self.assertIn("git remote add upstream https://github.com/upstream-owner/widget.git", stderr)
+
+        def not_a_fork(argv, timeout=5):
+            if argv[:3] == ["gh", "repo", "view"]:
+                payload = {"isFork": False, "parent": None}
+                return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(payload), stderr="")
+            return real(argv, timeout=timeout)
+
+        with patch.object(fix_route, "run", side_effect=not_a_fork):
+            route = fix_route.decide(work, offline=False)
+        self.assertEqual((route.route, route.source), ("external", "github"))
+
+    def test_origin_default_does_not_fall_back_to_the_current_branch(self):
+        work = self.repository(fork=False, name="no-head")
+        self.git("-C", str(work), "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+        self.git("-C", str(work), "update-ref", "-d", "refs/remotes/origin/main")
+        self.git("-C", str(work), "switch", "-c", "feature")
+        stderr, code = self.cli(work, "--offline")
+        self.assertEqual(code, 2)
+        self.assertIn("default branch unknown; git fetch origin", stderr)
+        self.assertNotIn("feature", stderr)
+
+    def test_ahead_count_ignores_local_refs_with_remote_names(self):
+        work = self.repository(ahead=True, name="shadow")
+        self.git("-C", str(work), "branch", "upstream/main", "HEAD")
+        self.git("-C", str(work), "tag", "origin/main", "HEAD")
+        self.assertEqual(fix_route.decide(work, offline=True).route, "upstream+carry")
+
+    def test_push_remote_order_includes_push_default(self):
+        work = self.repository(ahead=False, name="push-order")
+        self.assertEqual(fix_route.push_remote(work), "origin")
+        self.git("-C", str(work), "config", "remote.pushDefault", "upstream")
+        self.assertEqual(fix_route.push_remote(work), "upstream")
+        self.git("-C", str(work), "config", "branch.main.pushRemote", "origin")
+        self.assertEqual(fix_route.push_remote(work), "origin")
 
 
 if __name__ == "__main__":
