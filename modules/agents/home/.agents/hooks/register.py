@@ -52,12 +52,13 @@ def handlers(home: Path, provider: str) -> dict:
     for event, matcher, timeout in (
         ("SessionStart", None, 20),
         ("PostToolUse", "^(Edit|Write|apply_patch)$", 5),
+        ("PostToolUse", "^Bash$", 5),
         ("Stop", None, 30),
     ):
         group = {"hooks": [{"type": "command", "command": command, "timeout": timeout}]}
         if matcher:
             group["matcher"] = matcher
-        result[event] = [group]
+        result.setdefault(event, []).append(group)
     # Both providers: the route guard inspects Bash before Codex's RTK rewrite.
     result["PreToolUse"] = [{"matcher": "^Bash$", "hooks": [
         {"type": "command", "command": command, "timeout": 5},

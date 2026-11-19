@@ -1,11 +1,16 @@
-"""Block a Bash command that does not follow ``fix-route``.
+"""Steer git work to where ``fix-route`` says it goes, without the agent knowing the route.
 
-Offline only: a hook has a few seconds and must not call the network. Anything
-this module cannot parse, or any repository it cannot classify, is allowed.
+PreToolUse denies a commit, push, or ``gh pr create`` that misses the route; each reason is
+the whole instruction for an agent that has never heard of routes. PostToolUse reminds the
+agent to carry a change, or to ask about carrying it, after its upstream PR opens.
+
+Offline only: a hook has a few seconds and must not call the network. Anything this module
+cannot parse, or any repository it cannot classify, is allowed.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -26,9 +31,8 @@ _GH_VALUES = {
     "-a", "--assignee", "-r", "--reviewer", "-l", "--label", "-p", "--project", "-m", "--milestone",
     "-H", "--head", "-B", "--base", "-T", "--template", "--recover", "--jq",
 }
-_UPSTREAM = "fix-route: never push to upstream; push a branch to origin and open a PR."
-_CARRY = ("fix-route: this fork doesn't carry changes (fork main matches upstream). "
-          "Ask the user; if they want it carried: git config agents.route upstream+carry")
+_IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+_FORK_ROUTES = ("upstream", "upstream+carry")
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,11 @@ class GhCreate:
     repo: str | None
 
 
+@dataclass(frozen=True)
+class Commit:
+    directory: Path
+
+
 def guard(payload: dict) -> dict | None:
     """Deny decision for a Bash PreToolUse payload, or None to leave the command alone."""
     try:
@@ -55,20 +64,18 @@ def guard(payload: dict) -> dict | None:
         return None
 
 
+def remind(payload: dict) -> dict | None:
+    """Context for a Bash PostToolUse payload after an upstream PR opened, or None."""
+    try:
+        return _remind(payload)
+    except Exception:
+        return None
+
+
 def _guard(payload: dict) -> dict | None:
     if payload.get("hook_event_name") not in (None, "PreToolUse"):
         return None
-    if payload.get("tool_name") not in (None, "Bash"):
-        return None
-    tool_input = payload.get("tool_input")
-    if not isinstance(tool_input, dict):
-        return None
-    command = tool_input.get("command")
-    if not isinstance(command, str) or not _may_match(command):
-        return None
-    raw_cwd = payload.get("cwd")
-    base = Path(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else Path.cwd()
-    script = parse_script(command, base)
+    script = _script(payload)
     if script is None:
         return None
     cache: dict[str, object] = {}
@@ -79,8 +86,56 @@ def _guard(payload: dict) -> dict | None:
     return None
 
 
+def _remind(payload: dict) -> dict | None:
+    if payload.get("hook_event_name") != "PostToolUse":
+        return None
+    script = _script(payload)
+    if script is None:
+        return None
+    output = json.dumps(payload.get("tool_response"), default=str)
+    cache: dict[str, object] = {}
+    for cwd, argv in script:
+        created = parse_gh(argv)
+        if cwd is None or not isinstance(created, GhCreate) or created.repo is None:
+            continue
+        route = _cached_route(cwd, cache)
+        if not isinstance(route, fix_route.Route) or route.route not in _FORK_ROUTES:
+            continue
+        if not route.upstream_repo or not fix_route.same_repo(created.repo, route.upstream_repo):
+            continue
+        slug = fix_route.github_slug(f"https://github.com/{route.upstream_repo}")
+        if not slug or f"github.com/{slug}/pull/" not in output:
+            continue
+        default = route.default_branch
+        if route.route == "upstream+carry":
+            context = (f"vcs: the fork carries its own changes, so it carries this one too: "
+                       f"git switch {default} && git merge <this branch> && git push origin {default}. "
+                       "Do not open a PR on the fork.")
+        else:
+            context = (f"vcs: the fork's {default} matches upstream and doesn't get this change. "
+                       "Ask the user whether the fork should carry it until upstream merges; if yes: "
+                       f"git config agents.route upstream+carry, then git switch {default} && "
+                       f"git merge <this branch> && git push origin {default}.")
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}
+    return None
+
+
+def _script(payload: dict) -> list[tuple[Path | None, list[str]]] | None:
+    if payload.get("tool_name") not in (None, "Bash"):
+        return None
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not _may_match(command):
+        return None
+    raw_cwd = payload.get("cwd")
+    base = Path(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else Path.cwd()
+    return parse_script(command, base)
+
+
 def _may_match(command: str) -> bool:
-    if "git" in command and "push" in command:
+    if "git" in command and ("push" in command or "commit" in command):
         return True
     return "gh" in command and "pr" in command and "create" in command
 
@@ -89,12 +144,13 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
     if not argv or cwd is None:
         return None
     push = parse_push(argv, cwd)
-    created = None if push is not None else parse_gh(argv)
-    if push is None and created is None:
+    commit = parse_commit(argv, cwd) if push is None else None
+    created = None if push is not None or commit is not None else parse_gh(argv)
+    if push is None and commit is None and created is None:
         return None
-    if push is _AMBIGUOUS or created is _AMBIGUOUS:
+    if _AMBIGUOUS in (push, commit, created):
         return None
-    directory = push.directory if isinstance(push, Push) else cwd
+    directory = push.directory if isinstance(push, Push) else commit.directory if isinstance(commit, Commit) else cwd
     route = _cached_route(directory, cache)
     if route is _NOT_A_REPO:
         return None
@@ -102,30 +158,87 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
     # so the never-push-upstream rule below still applies to that case.
     if isinstance(route, fix_route.Route) and route.route == "unknown":
         return None
+    known = route if isinstance(route, fix_route.Route) else None
+    if isinstance(commit, Commit):
+        return _deny(_commit_reason(known, directory)) if _commit_misses(known, directory) else None
     if isinstance(push, Push):
         if push.dry_run:
             return None
         if _pushes_upstream(push, directory) and not _explicit_direct(directory, cache):
-            return _deny(_UPSTREAM)
-        if isinstance(route, fix_route.Route) and route.route == "upstream" and _pushes_origin_default(push, directory):
-            return _deny(_CARRY)
-        if isinstance(route, fix_route.Route) and route.route == "external" and _pushes_origin_default(push, directory):
-            repo = route.origin_repo or "this repo"
-            return _deny(f"fix-route: {repo} isn't the user's; push a branch and open a PR.")
+            return _deny(_upstream_push_reason(known))
+        if known and known.route == "upstream" and _pushes_origin_default(push, directory):
+            return _deny(_carry_reason(known))
+        if known and known.route == "external" and _pushes_origin_default(push, directory):
+            repo = known.origin_repo or "this repository"
+            return _deny(f"vcs: {repo} isn't the user's, so never push its {known.default_branch}. "
+                         "Push your branch instead (git push -u origin HEAD) and open a PR: gh pr create. "
+                         "If you can't push to it, fork it and push the branch to the fork.")
         return None
-    if not isinstance(created, GhCreate) or not isinstance(route, fix_route.Route):
+    if not isinstance(created, GhCreate) or known is None:
         return None
-    if route.route == "external":
+    if known.route == "external":
         return None
-    if route.route == "direct":
-        repo = route.origin_repo or "this repo"
-        return _deny(f"fix-route: {repo} takes direct pushes: commit on {route.default_branch} and push; no PR.")
-    if route.route in ("upstream", "upstream+carry") and route.upstream_repo:
-        if created.repo is not None and fix_route.same_repo(created.repo, route.upstream_repo):
+    if known.route == "direct":
+        repo = known.origin_repo or "This repository"
+        return _deny(f"vcs: {repo} is the user's own and takes no PRs. Commit on {known.default_branch} "
+                     f"and push it: git push origin {known.default_branch}.")
+    if known.route in _FORK_ROUTES and known.upstream_repo:
+        if created.repo is not None and fix_route.same_repo(created.repo, known.upstream_repo):
             return None
-        return _deny("fix-route: this is a fork; open the PR against upstream: "
-                     f"gh pr create --repo {route.upstream_repo} ...")
+        return _deny("vcs: this is a fork; the PR goes to upstream, not to the fork: "
+                     f"gh pr create --repo {known.upstream_repo} ...")
     return None
+
+
+def _commit_misses(route: fix_route.Route | None, directory: Path) -> bool:
+    """True when a commit would land on the default branch of a fork or someone else's repo."""
+    if route is None or route.route not in (*_FORK_ROUTES, "external"):
+        return False
+    branch = fix_route.local_branch(directory)
+    if not branch or branch != fix_route.remote_default(directory, "origin"):
+        return False
+    found = fix_route.git(directory, "rev-parse", "--absolute-git-dir")
+    if found.returncode != 0 or not found.stdout.strip():
+        return False
+    git_dir = Path(found.stdout.strip())
+    # Resolving a merge, rebase, cherry-pick, or revert on the default branch is how a fork
+    # carries a change or syncs with upstream.
+    return not any((git_dir / name).exists() for name in _IN_PROGRESS)
+
+
+def _commit_reason(route: fix_route.Route, directory: Path) -> str:
+    default = route.default_branch
+    if route.route == "external":
+        repo = route.origin_repo or "this repository"
+        return (f"vcs: {repo} isn't the user's, so nothing is committed on its {default}. "
+                "Commit on a branch (git switch -c <branch>), push it (git push -u origin HEAD), "
+                "and open a PR: gh pr create. If you can't push to it, fork it and push the branch there.")
+    upstream = route.upstream_repo or "<upstream owner/repo>"
+    base = fix_route.remote_default(directory, "upstream") or default
+    steps = (f"vcs: this is a fork of {upstream}; changes go to upstream as a PR, so don't commit on "
+             f"the fork's {default}. git fetch upstream && git switch -c <branch> upstream/{base}, "
+             f"commit there, git push -u origin HEAD, gh pr create --repo {upstream}. ")
+    if route.route == "upstream+carry":
+        return steps + (f"The fork carries its own changes, so then also git switch {default} && "
+                        f"git merge <branch> && git push origin {default}.")
+    return steps + (f"The fork's {default} matches upstream and doesn't get the change: ask the user "
+                    "whether the fork should carry it until upstream merges.")
+
+
+def _upstream_push_reason(route: fix_route.Route | None) -> str:
+    target = route.upstream_repo if route and route.upstream_repo else "<upstream owner/repo>"
+    return ("vcs: never push to upstream. Push your branch to origin (git push -u origin HEAD) "
+            f"and open a PR: gh pr create --repo {target}.")
+
+
+def _carry_reason(route: fix_route.Route) -> str:
+    default = route.default_branch
+    target = route.upstream_repo or "<upstream owner/repo>"
+    return (f"vcs: the fork's {default} matches upstream and doesn't carry changes, so don't push it. "
+            f"Put the change on a branch from upstream/{default}, push that branch "
+            f"(git push -u origin HEAD) and open a PR: gh pr create --repo {target}. "
+            "Ask the user whether the fork should carry it until upstream merges; if yes: "
+            f"git config agents.route upstream+carry, then merge the branch into {default} and push it.")
 
 
 def _explicit_direct(directory: Path, cache: dict[str, object]) -> bool:
@@ -277,6 +390,34 @@ def parse_script(command: str, base: Path) -> list[tuple[Path | None, list[str]]
 
 def parse_push(argv: list[str], cwd: Path) -> Push | object | None:
     """A ``git push`` invocation, None when ``argv`` is not one, or ambiguous."""
+    found = _git_subcommand(argv, cwd)
+    if found is None or found is _AMBIGUOUS:
+        return found
+    directory, subcommand, rest = found
+    if subcommand != "push":
+        return None
+    parsed = _push_args(rest)
+    if parsed is _AMBIGUOUS:
+        return _AMBIGUOUS
+    remote, refspecs, delete, tags, all_branches, dry_run = parsed
+    return Push(directory, remote, refspecs, delete, tags, all_branches, dry_run)
+
+
+def parse_commit(argv: list[str], cwd: Path) -> Commit | object | None:
+    """A ``git commit`` that records a commit, None for anything else (including --dry-run)."""
+    found = _git_subcommand(argv, cwd)
+    if found is None or found is _AMBIGUOUS:
+        return found
+    directory, subcommand, rest = found
+    if subcommand != "commit":
+        return None
+    if any(token in {"--dry-run", "-h", "--help"} for token in rest):
+        return None
+    return Commit(directory)
+
+
+def _git_subcommand(argv: list[str], cwd: Path) -> tuple[Path, str, list[str]] | object | None:
+    """The directory, subcommand, and its arguments of a git command line."""
     if not argv or Path(argv[0]).name != "git":
         return None
     directories: list[str] = []
@@ -309,19 +450,13 @@ def parse_push(argv: list[str], cwd: Path) -> Push | object | None:
         break
     else:
         return None
-    if argv[index] != "push":
-        return None
     directory = cwd
     for item in directories:
         path = Path(item).expanduser()
         if not path.is_absolute():
             path = directory / path
         directory = path
-    parsed = _push_args(argv[index + 1:])
-    if parsed is _AMBIGUOUS:
-        return _AMBIGUOUS
-    remote, refspecs, delete, tags, all_branches, dry_run = parsed
-    return Push(directory, remote, refspecs, delete, tags, all_branches, dry_run)
+    return directory, argv[index], argv[index + 1:]
 
 
 def parse_gh(argv: list[str]) -> GhCreate | object | None:

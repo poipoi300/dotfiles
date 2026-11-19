@@ -37,6 +37,9 @@ def dispatch(provider: str, payload: dict) -> dict:
         return behavior.rewrite_shell(payload) if provider == "codex" else {}
     if event not in ("SessionStart", "PostToolUse", "Stop"):
         return {}
+    if event == "PostToolUse" and payload.get("tool_name") == "Bash":
+        # Bash is registered only for the route reminder; design feedback is for file edits.
+        return vcs_guard.remind(payload) or {}
     # Recording failure must not suppress design feedback or startup context.
     try:
         behavior.record_marker(provider, payload, ROOT / "hooks" / "state")

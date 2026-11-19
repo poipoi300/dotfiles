@@ -17,9 +17,10 @@ import native
 import test_fix_route
 import vcs_guard
 
-CARRY = ("fix-route: this fork doesn't carry changes (fork main matches upstream). "
-         "Ask the user; if they want it carried: git config agents.route upstream+carry")
-UPSTREAM_PUSH = "fix-route: never push to upstream; push a branch to origin and open a PR."
+CARRY = ("Ask the user whether the fork should carry it until upstream merges; if yes: "
+         "git config agents.route upstream+carry, then merge the branch into main and push it.")
+UPSTREAM_PUSH = ("vcs: never push to upstream. Push your branch to origin (git push -u origin HEAD) "
+                 "and open a PR: gh pr create --repo")
 
 
 class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
@@ -59,8 +60,8 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         direct = self.repository(fork=False, name="direct")
         fork = self.repository(ahead=False, name="fork")
         carry = self.repository(ahead=True, name="carry")
-        self.assert_deny("gh pr create", direct, "solo-owner/widget takes direct pushes: commit on main and push; no PR.")
-        self.assert_deny("gh pr create --repo upstream-owner/widget", direct, "no PR.")
+        self.assert_deny("gh pr create", direct, "vcs: solo-owner/widget is the user's own and takes no PRs. Commit on main and push it: git push origin main.")
+        self.assert_deny("gh pr create --repo upstream-owner/widget", direct, "takes no PRs")
         for command in ("gh pr create", "gh pr create --repo origin-owner/widget",
                         "gh pr create -R origin-owner/widget", "gh pr create --repo=https://github.com/origin-owner/widget"):
             self.assert_deny(command, fork, "gh pr create --repo upstream-owner/widget")
@@ -137,9 +138,9 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.write_hosts_user("other-person")
         reason = self.assert_deny(
             "git push origin main", work,
-            "fix-route: solo-owner/widget isn't the user's; push a branch and open a PR.",
+            "vcs: solo-owner/widget isn't the user's, so never push its main.",
         )
-        self.assertEqual(reason, "fix-route: solo-owner/widget isn't the user's; push a branch and open a PR.")
+        self.assertIn("git push -u origin HEAD", reason)
         self.assert_deny("git push", work, "isn't the user's")
         self.assert_allow("gh pr create", work)
         self.assert_allow("gh pr create --repo solo-owner/widget", work)
@@ -158,6 +159,7 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
 
     def test_heredoc_bodies_are_not_commands(self):
         fork = self.repository(ahead=False, name="heredoc")
+        self.git("-C", str(fork), "switch", "-c", "feature")
         self.assert_allow("git commit -F - <<EOF\ngit push origin main\nEOF", fork)
         self.assert_allow("cat > f <<'EOF'\ngit push upstream main\nEOF", fork)
         self.assert_allow("cat > f <<-'EOF'\n\tgit push upstream main\n\tEOF", fork)
@@ -214,7 +216,7 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.git("-C", str(fork), "config", "agents.route", "direct")
         self.assert_allow("git push upstream", fork)
         self.assert_allow("git push upstream main", fork)
-        self.assert_deny("gh pr create", fork, "no PR.")
+        self.assert_deny("gh pr create", fork, "takes no PRs")
         with patch.object(fix_route, "decide", side_effect=RuntimeError("boom")):
             self.assert_allow("git push upstream", fork)
 
@@ -234,9 +236,95 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         with patch.object(fix_route, "run") as run:
             self.assert_allow("ls -la", self.root)
             self.assert_allow('echo "git push upstream"', self.root)
-            self.assert_allow('git commit -m "push the branch"', self.root)
+            self.assert_allow('git log --grep "push the branch"', self.root)
+            self.assert_allow('git log --grep "commit the branch"', self.root)
             self.assert_allow('git push "', self.root)
             run.assert_not_called()
+
+
+    def test_commit_on_a_fork_default_branch_is_denied_with_the_workflow(self):
+        fork = self.repository(ahead=False, name="commit-fork")
+        carry = self.repository(ahead=True, name="commit-carry")
+        direct = self.repository(fork=False, name="commit-direct")
+        reason = self.assert_deny('git commit -m "Fix it"', fork, "vcs: this is a fork of upstream-owner/widget")
+        self.assertIn("git switch -c <branch> upstream/main", reason)
+        self.assertIn("gh pr create --repo upstream-owner/widget", reason)
+        self.assertIn("ask the user whether the fork should carry it", reason)
+        reason = self.assert_deny("git commit -am x", carry, "gh pr create --repo upstream-owner/widget")
+        self.assertIn("git merge <branch> && git push origin main", reason)
+        self.assert_deny("git -C commit-fork commit -m x", fork.parent, "this is a fork")
+        self.assert_deny("cd commit-fork && rtk git commit --amend --no-edit", fork.parent, "this is a fork")
+        for command in ("git commit --dry-run -m x", "git commit -h", "git commit-tree HEAD^{tree}",
+                        "GIT_DIR=/x git commit -m x", 'echo "git commit"'):
+            self.assert_allow(command, fork)
+        self.assert_allow("git commit -m x", direct)
+        self.git("-C", str(fork), "switch", "-c", "feature")
+        self.assert_allow("git commit -m x", fork)
+
+    def test_commit_during_a_merge_or_rebase_is_allowed(self):
+        fork = self.repository(ahead=False, name="commit-merge")
+        git_dir = Path(self.git("-C", str(fork), "rev-parse", "--absolute-git-dir").stdout.strip())
+        for name in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+            path = git_dir / name
+            if name.startswith("rebase"):
+                path.mkdir()
+            else:
+                path.write_text("0" * 40 + "\n", encoding="utf-8")
+            self.assert_allow("git commit --no-edit", fork)
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
+        self.assert_deny("git commit --no-edit", fork, "this is a fork")
+
+    def test_commit_on_someone_elses_default_branch_is_denied(self):
+        work = self.repository(fork=False, name="commit-theirs")
+        self.write_hosts_user("other-person")
+        reason = self.assert_deny("git commit -m x", work, "vcs: solo-owner/widget isn't the user's")
+        self.assertIn("git switch -c <branch>", reason)
+        self.git("-C", str(work), "switch", "-c", "feature")
+        self.assert_allow("git commit -m x", work)
+        self.write_hosts_user(None)
+        self.git("-C", str(work), "switch", "main")
+        self.assert_allow("git commit -m x", work)
+
+    def post(self, command, cwd, response):
+        return {"hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": str(cwd),
+                "tool_input": {"command": command}, "tool_response": response}
+
+    def test_an_opened_upstream_pr_reminds_about_carrying(self):
+        fork = self.repository(ahead=False, name="remind-fork")
+        carry = self.repository(ahead=True, name="remind-carry")
+        direct = self.repository(fork=False, name="remind-direct")
+        created = "gh pr create --repo upstream-owner/widget --fill"
+        url = "https://github.com/upstream-owner/widget/pull/7\n"
+        for response in ({"stdout": url, "stderr": "", "interrupted": False}, url):
+            context = vcs_guard.remind(self.post(created, carry, response))
+            specific = context["hookSpecificOutput"]
+            self.assertEqual(specific["hookEventName"], "PostToolUse")
+            self.assertIn("git switch main && git merge <this branch> && git push origin main",
+                          specific["additionalContext"])
+        context = vcs_guard.remind(self.post(created, fork, {"stdout": url}))
+        self.assertIn("Ask the user whether the fork should carry it",
+                      context["hookSpecificOutput"]["additionalContext"])
+        failed = {"stdout": "", "stderr": "GraphQL: rate limit exceeded"}
+        self.assertIsNone(vcs_guard.remind(self.post(created, carry, failed)))
+        self.assertIsNone(vcs_guard.remind(self.post("git status", carry, {"stdout": url})))
+        self.assertIsNone(vcs_guard.remind(self.post(created, direct, {"stdout": url})))
+        other = "https://github.com/origin-owner/widget/pull/3"
+        self.assertIsNone(vcs_guard.remind(self.post("gh pr create --repo origin-owner/widget", carry, other)))
+        with patch.object(behavior, "design_hook") as design:
+            for provider in ("claude", "codex"):
+                output = native.dispatch(provider, self.post(created, carry, {"stdout": url}))
+                self.assertIn("additionalContext", output["hookSpecificOutput"])
+                self.assertEqual(native.dispatch(provider, self.post("ls", carry, "")), {})
+            design.assert_not_called()
+
+    def test_bash_post_tool_use_is_registered_for_both_providers(self):
+        import register
+        for provider in ("claude", "codex"):
+            groups = register.handlers(Path.home(), provider)["PostToolUse"]
+            self.assertEqual([group["matcher"] for group in groups], ["^(Edit|Write|apply_patch)$", "^Bash$"])
 
 
 if __name__ == "__main__":
