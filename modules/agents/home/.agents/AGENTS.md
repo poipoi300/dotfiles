@@ -55,10 +55,11 @@ thread reported that the user hasn't answered yet.
 When you find or strongly suspect a bug in something the user owns (their
 forks, scripts, dotfiles, projects), including one next to the task at hand,
 don't stop at reporting it or offering a fix. Write a test that fails because
-of the bug, fix it, show the test passes, open a PR, and tell the user what it
-fixes and how you verified it. The user decides whether to merge; never merge
-these yourself. When a test can't reproduce the bug (it depends on a live
-service or UI, for example), say so in the PR and give the manual evidence.
+of the bug, fix it, show the test passes, deliver it where the `vcs` skill
+routes it (`fix-route`: a direct push, an upstream PR, or both), and tell the
+user what it fixes and how you verified it. When a test can't reproduce the bug
+(it depends on a live service or UI, for example), say so in the commit or PR
+and give the manual evidence.
 
 ## Correctness
 

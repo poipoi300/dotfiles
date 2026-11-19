@@ -7,7 +7,10 @@ metadata:
 
 # File PR
 
-Before filing, check whether a PR for this branch already exists. Review the
+Run `fix-route` first (see the `vcs` skill): a `direct` repository takes a
+push instead of a PR, and in a fork the PR goes to upstream with
+`gh pr create --repo <upstream>`. Before filing, check whether a PR for this
+branch already exists. Review the
 diff locally against the base branch (usually `origin/main`) to make sure its
 contents match the goal.
 
