@@ -33,12 +33,14 @@ none are left.
 the same approved AUR commits:
 
 1. checks that the checkout is on the default branch with nothing in progress and that
-   its git identity is the GitHub noreply address, then commits a pending approvals
+   its git identity is the public one (name and GitHub noreply email), then commits a pending approvals
    change and pulls this repository;
 2. `sudo pacman -Syu`, `rustup update stable`, `aurlock upgrade`, `claude update`;
 3. rechecks the checkout, commits new approvals and pushes them to the upstream branch
-   only, when every unpushed commit is an `aurlock: approvals` commit by the noreply
-   identity touching only the approvals file, every line of that file has the format
+   only (no tags), when every unpushed commit is an `aurlock: approvals` commit by a
+   name the remote already shows with the noreply email, touching only the approvals
+   file, nothing in it or its metadata names this machine (hostname, user, home,
+   addresses), every line of that file has the format
    aurlock writes (comments only when the remote already has them), and gitleaks passes;
 4. ends with what `arcus plan` says; it never applies.
 

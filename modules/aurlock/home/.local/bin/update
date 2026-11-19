@@ -61,7 +61,7 @@ state_ok || die "nothing was upgraded"
 # Approvals are committed under the effective identity (environment included), so check
 # that one before anything else happens.
 for who in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
-	ident=$(g var "$who" 2>/dev/null) || die "$repo has no git identity; set the GitHub noreply address: git -C $repo config user.email <id>+<login>@users.noreply.github.com"
+	ident=$(g var "$who" 2>/dev/null) || die "$repo has no git identity; set the public one: git -C $repo config user.name <login> and git -C $repo config user.email <id>+<login>@users.noreply.github.com"
 	grep -qE "${noreply}> " <<<"$ident" ||
 		die "$repo's git identity isn't the GitHub noreply address; it would be published. Set it: git -C $repo config user.email <id>+<login>@users.noreply.github.com"
 done
@@ -112,22 +112,42 @@ pull() {
 # to the characters pacman versions and AUR user names use.
 record='^[a-z0-9@_+][a-z0-9@._+-]* [0-9a-f]{40} [A-Za-z0-9._:+~-]+ [A-Za-z0-9._-]+ [0-9]{4}-[0-9]{2}-[0-9]{2} (offline|online)$'
 
-# pushable: true when every unpushed commit is an approvals commit by the noreply identity
-# that changes only the approvals file, leaves it well-formed, and gitleaks passes.
+# private: this machine's details that must never be published (hostname, user, home,
+# addresses), one per line, for grep -F.
+private() {
+	local h
+	h=$(uname -n)
+	printf '%s\n' "$h" "${h%%.*}" "${USER:-$(id -un)}" "$HOME"
+	ip -o -4 addr show 2>/dev/null | awk '{ split($4, a, "/"); if (a[1] !~ /^127\./) print a[1] }'
+	ip -o -6 addr show scope global 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'
+}
+
+# pushable: true when every unpushed commit is an approvals commit by an identity the
+# remote already shows, with the noreply email, changing only the approvals file, leaving
+# it well-formed and free of this machine's details, and gitleaks passes.
 pushable() {
-	local base head commits c files bad known=()
+	local base head commits c files bad known=() people=() secret=()
 	base=$(g rev-parse '@{upstream}') && head=$(g rev-parse HEAD) || return 1
+	vetted=$head # pushed by SHA, so a commit made after this check can't ride along
 	commits=$(g rev-list "$base..$head")
-	# Comments are allowed only when the remote already has them.
+	# Comments and names are allowed only when the remote already has them.
 	mapfile -t known < <(g show "$base:$approved" 2>/dev/null | LC_ALL=C grep -a '^#')
+	mapfile -t people < <(g log --format='%an%n%cn' "$base" | sort -u)
+	mapfile -t secret < <(private | grep -v '^$' | sort -u)
 	for c in $commits; do
 		files=$(g diff-tree --no-commit-id --name-only -r "$c")
 		if [[ $files != "$approved" || $(g log -1 --format=%B "$c") != "$subject" ]]; then
 			warn "unpushed commit $(g log -1 --format='%h %s' "$c") isn't an approvals commit; not pushing. Push it yourself after checking it."
 			return 1
 		fi
-		if g log -1 --format='%ae%n%ce' "$c" | grep -qvE "${noreply}\$"; then
-			warn "unpushed commit $(g log -1 --format=%h "$c") isn't by the GitHub noreply identity; not pushing"
+		if g log -1 --format='%ae%n%ce' "$c" | grep -qvE "${noreply}\$" ||
+			g log -1 --format='%an%n%cn' "$c" | grep -qvxF "${people[@]/#/-e}"; then
+			warn "unpushed commit $(g log -1 --format=%h "$c") isn't by an identity the remote already shows with the GitHub noreply email; not pushing"
+			return 1
+		fi
+		if { g log -1 --format='%an%n%ae%n%cn%n%ce%n%B' "$c"; g show "$c:$approved"; } |
+			LC_ALL=C grep -aqiwF "${secret[@]/#/-e}"; then
+			warn "unpushed commit $(g log -1 --format=%h "$c") contains this machine's hostname, user name, home path or address; not pushing"
 			return 1
 		fi
 		bad=$(g show "$c:$approved" | LC_ALL=C grep -avE "$record" | LC_ALL=C grep -avxF -e '' "${known[@]/#/-e}")
@@ -154,13 +174,14 @@ push_approvals() {
 	fi
 	pushable || return 1
 	local err
-	# An explicit refspec: only this branch, whatever push.default says.
-	if err=$(g push -q "$remote" "HEAD:refs/heads/$branch" 2>&1); then
+	# An explicit refspec and no tags: only this branch, whatever push.default or
+	# push.followTags say.
+	if err=$(g push -q --no-follow-tags "$remote" "$vetted:refs/heads/$branch" 2>&1); then
 		echo "pushed approvals"
 		return 0
 	fi
 	if grep -qE 'non-fast-forward|fetch first|rejected' <<<"$err" && pull && pushable &&
-		g push -q "$remote" "HEAD:refs/heads/$branch"; then
+		g push -q --no-follow-tags "$remote" "$vetted:refs/heads/$branch"; then
 		echo "pushed approvals (after pulling the other machines')"
 		return 0
 	fi
@@ -184,6 +205,7 @@ $plan"
 say "dotfiles"
 commit_approvals || die "couldn't commit the approvals; nothing was upgraded"
 pull || die "nothing was upgraded"
+state_ok || die "nothing was upgraded" # the fetch may have learned the remote's default branch
 
 say "pacman"
 if ! sudo pacman -Syu; then

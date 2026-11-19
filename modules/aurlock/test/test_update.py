@@ -254,6 +254,31 @@ class Update(unittest.TestCase):
         self.assertIn("foo ", (self.a / APPROVED).read_text())
         self.assertEqual(self.git(self.a, "rev-list", "--count", "origin/main..HEAD").strip(), "0")
 
+    def test_this_machines_details_are_not_pushed(self):
+        host = os.uname().nodename
+        cases = {"version": f"foo {'a' * 40} {host} someone 2026-11-18 offline",
+                 "maintainer": f"foo {'a' * 40} 1.0-1 {host.split('.')[0]} 2026-11-18 offline"}
+        for label, line in cases.items():
+            with self.subTest(label):
+                result = self.run_update(self.a, NEW_APPROVAL=line)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("this machine's", result.stderr)
+                self.git(self.a, "reset", "-q", "--hard", "origin/main")
+
+    def test_an_identity_the_remote_doesnt_show_is_not_pushed(self):
+        result = self.run_update(self.a, GIT_AUTHOR_NAME="Private Person",
+                                 NEW_APPROVAL=LINE.format(name="foo").strip())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("identity the remote already shows", result.stderr)
+
+    def test_tags_are_not_pushed_with_the_approvals(self):
+        self.git(self.a, "config", "push.followTags", "true")
+        self.git(self.a, "tag", "-a", "-m", "private note", "private-tag")
+        result = self.run_update(self.a, NEW_APPROVAL=LINE.format(name="foo").strip())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git(self.a, "ls-remote", "--tags", "origin").strip(), "")
+        self.assertIn("foo ", self.git(self.a, "show", f"origin/main:{APPROVED}"))
+
 
 class MergeDriver(unittest.TestCase):
     """merge-approvals on its own: BASE OURS THEIRS, result in OURS."""
