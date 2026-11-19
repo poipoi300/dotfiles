@@ -47,6 +47,13 @@ class RouteError(Exception):
         self.code = code
 
 
+class ConfiguredRouteError(RouteError):
+    """An explicitly configured ``agents.route`` cannot be applied.
+
+    The guard fails closed on it, unlike an automatic route that merely cannot be decided.
+    """
+
+
 class DefaultBranchUnknown(RouteError):
     """Origin's default branch cannot be read from the local refs.
 
@@ -248,17 +255,24 @@ def remote_url(directory: Path, name: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def remote_default(directory: Path, remote: str) -> str | None:
-    """Default branch of a remote: its HEAD symref, else ``main``, else ``master``."""
+def remote_default(directory: Path, remote: str, *, guess: bool = True) -> str | None:
+    """Default branch of a remote: its HEAD symref, else (when ``guess``) ``main``, else ``master``.
+
+    The full symref is read: ``--short`` abbreviates to ``remotes/<remote>/<branch>`` when a
+    local branch is named ``<remote>/<branch>``. A configured route passes ``guess=False``,
+    because a guessed default can name the wrong branch when several exist.
+    """
+    prefix = f"refs/remotes/{remote}/"
     try:
-        head = git(directory, "symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD")
+        head = git(directory, "symbolic-ref", f"{prefix}HEAD")
     except (OSError, subprocess.TimeoutExpired):
         return None
     if head.returncode == 0:
-        text = head.stdout.strip()
-        for prefix in (f"{remote}/", f"refs/remotes/{remote}/"):
-            if text.startswith(prefix):
-                return text[len(prefix):]
+        target = head.stdout.strip()
+        if target.startswith(prefix) and len(target) > len(prefix):
+            return target[len(prefix):]
+    if not guess:
+        return None
     for branch in ("main", "master"):
         try:
             found = git(directory, "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}")
@@ -421,9 +435,10 @@ def _configured_route(directory: Path) -> str | None:
     if value is None:
         return None
     if value not in ROUTES:
-        raise RouteError(
+        raise ConfiguredRouteError(
             "fix-route: agents.route must be direct, pr, upstream, or upstream+carry "
-            f"(got {value!r})"
+            f"(got {value!r}); fix it with git config agents.route <route>, "
+            "or remove it with git config --unset agents.route"
         )
     return value
 
@@ -452,7 +467,8 @@ def _ahead(directory: Path) -> bool:
 
 
 def _origin_default(directory: Path, configured: str | None = None) -> str:
-    branch = remote_default(directory, "origin")
+    """Origin's default branch. A configured route that depends on it never guesses."""
+    branch = remote_default(directory, "origin", guess=configured not in NEEDS_DEFAULT)
     if not branch:
         raise DefaultBranchUnknown(configured if configured in NEEDS_DEFAULT else None)
     return branch
@@ -464,11 +480,16 @@ def _finish(directory: Path, route: str, source: str, origin_repo: str | None,
     if route in ("direct", "pr"):
         return Route(route, source, origin_default, None, origin_repo,
                      route_steps(route, origin_default, None, None))
+    # An explicit route that cannot be applied is a violation waiting to happen; an automatic one is not.
+    failure = ConfiguredRouteError if source == "config" else RouteError
     if upstream is None:
-        raise RouteError(f"fix-route: agents.route is {route} but this repository has no upstream remote")
+        raise failure(
+            f"fix-route: agents.route is {route} but this repository has no upstream remote; "
+            "add it (git remote add upstream <url> && git fetch upstream) or change agents.route"
+        )
     upstream_default = remote_default(directory, "upstream")
     if upstream_default is None:
-        raise RouteError(
+        raise failure(
             "fix-route: cannot determine the default branch of upstream; run git fetch --all, then rerun"
         )
     target = github_slug(upstream) or upstream

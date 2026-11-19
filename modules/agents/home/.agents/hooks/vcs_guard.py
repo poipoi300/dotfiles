@@ -6,11 +6,17 @@ agent to carry a change, or to ask about carrying it, after its upstream PR open
 
 A repository configured ``agents.route pr`` (in its own config) is the user's own and integrates
 through pull requests: the guard allows ``gh pr create`` onto that repository from a branch, and
-feature-branch pushes. It denies a commit, merge, cherry-pick, rebase, ``am``, revert or non
-fast-forward pull on the default branch, even mid-operation, and a push to it.
+feature-branch pushes. It denies a commit, merge, cherry-pick, rebase, ``am``, revert or pull on
+the default branch, even mid-operation, and a push to it. Only a fast-forward from origin's
+default branch is let through. A route that is configured explicitly but cannot be applied fails
+closed: commits, pushes, merges and replays, and ``gh pr create`` are denied with the router's error.
+
+Threat model: the guard steers well-meaning agents away from the wrong integration route. It is
+not a security boundary against a deliberately crafted command, and it is not a Git or gh parser;
+it recognises the realistic spellings of the commands that miss a route.
 
 Offline only: a hook has a few seconds and must not call the network. Anything this module
-cannot parse, or any repository it cannot classify, is allowed.
+cannot parse, or any repository it cannot classify without a configured route, is allowed.
 """
 
 from __future__ import annotations
@@ -32,10 +38,14 @@ _REDIRECTS = {">", ">>", "<", ">|"}
 _GIT_VALUES = {"-c", "--exec-path", "--namespace", "--config-env", "--super-prefix", "--list-cmds"}
 _PUSH_VALUES = {"--repo", "--receive-pack", "--exec", "-o", "--push-option"}
 _GH_VALUES = {
-    "-R", "--repo", "--hostname", "-t", "--title", "-b", "--body", "-F", "--body-file",
-    "-a", "--assignee", "-r", "--reviewer", "-l", "--label", "-p", "--project", "-m", "--milestone",
-    "-H", "--head", "-B", "--base", "-T", "--template", "--recover", "--jq",
+    "--repo", "--hostname", "--title", "--body", "--body-file", "--assignee", "--reviewer", "--label",
+    "--project", "--milestone", "--head", "--base", "--template", "--recover", "--jq",
 }
+# Short options of ``gh pr create`` that take a value, alone or at the end of a bundle such as ``-fR``.
+_GH_SHORT_VALUES = set("RtbFarlpmHBT")
+# ``git rebase`` options whose value is the next word.
+_REBASE_VALUES = {"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec", "--empty",
+                  "--whitespace", "-C"}
 _IN_PROGRESS = ("MERGE_HEAD", "SQUASH_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
 # Subcommands that can change the checked-out branch before a later command in the same script runs.
 _MOVES = {"switch", "checkout", "worktree", "branch", "rebase", "reset", "stash", "bisect"}
@@ -203,6 +213,8 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
         return None
     if isinstance(route, fix_route.DefaultBranchUnknown):
         return _unknown_default(route, push, replay)
+    if isinstance(route, fix_route.ConfiguredRouteError):
+        return _configured_failure(route, directory, cache, moved, push, replay)
     # Login unknown: nothing here is a clear violation. A crashed decide() is not this route,
     # so the never-push-upstream rule below still applies to that case.
     if isinstance(route, fix_route.Route) and route.route == "unknown":
@@ -213,9 +225,11 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
             return None
         return _deny(_commit_reason(known, directory))
     if isinstance(replay, Replay):
-        if moved or known is None or known.route != "pr" or not _replays_commits(replay):
+        if moved or known is None or known.route != "pr":
             return None
-        if not _on_default_branch(directory, known.default_branch):
+        if not _replays_commits(replay, known.default_branch):
+            return None
+        if not _replays_onto_default(replay, known.default_branch):
             return None
         return _deny(_replay_reason(known))
     if isinstance(push, Push):
@@ -259,6 +273,22 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
     return None
 
 
+def _configured_failure(error: fix_route.ConfiguredRouteError, directory: Path, cache: dict[str, object],
+                        moved: bool, push: object, replay: object) -> dict | None:
+    """An explicit route that cannot be applied: every mutation is denied with the router's error."""
+    if isinstance(push, Push):
+        if push.dry_run:
+            return None
+        # Pushing upstream is wrong without any route, so its own instruction still applies.
+        if _pushes_upstream(push, directory, moved) and not _explicit_direct(directory, cache):
+            return _deny(_upstream_push_reason(None))
+    if isinstance(replay, Replay) and _inert(replay):
+        return None
+    problem = str(error).removeprefix("fix-route: ")
+    return _deny("vcs: the configured route can't be applied, so nothing is committed, pushed, merged or "
+                 f"opened until it is fixed: {problem}")
+
+
 def _unknown_default(error: fix_route.DefaultBranchUnknown, push: object, replay: object) -> dict | None:
     """A configured route is stated in terms of origin's default branch, which cannot be read.
 
@@ -266,7 +296,7 @@ def _unknown_default(error: fix_route.DefaultBranchUnknown, push: object, replay
     """
     if isinstance(push, Push) and push.dry_run:
         return None
-    if isinstance(replay, Replay) and (error.route != "pr" or not _replays_commits(replay)):
+    if isinstance(replay, Replay) and (error.route != "pr" or not _replays_commits(replay, None)):
         return None
     return _deny(f"vcs: the default branch of origin is unknown, so the {error.route} route can't tell it from "
                  "a feature branch. Establish it first: git fetch origin && git remote set-head origin -a "
@@ -277,13 +307,21 @@ def _pr_create_decision(route: fix_route.Route, created: GhCreate, directory: Pa
                         gh_repo: object) -> dict | None:
     """``gh pr create`` in a ``pr`` repository goes to origin's repository, from a branch."""
     repo = route.origin_repo or "this repository"
-    for target in _pr_targets(created, directory, gh_repo):
+    env = os.environ.get("GH_REPO") if gh_repo is _INHERIT else gh_repo
+    targets = _pr_targets(created, env, directory)
+    for target in targets:
         if route.origin_repo and fix_route.same_repo(target, route.origin_repo):
             continue
         shown = fix_route.github_slug(target) or target
         return _deny(f"vcs: {repo} integrates through pull requests, so a PR goes to it, not to {shown}. "
                      "Drop --repo/-R, GH_REPO and the gh default (gh repo set-default --unset), "
                      "then run: gh pr create")
+    if route.origin_repo and not targets and _several_github_repos(directory):
+        # gh picks the PR's base from its default, else from the remotes, and origin is not always its pick.
+        return _deny(f"vcs: {repo} integrates through pull requests, but this repository has several GitHub "
+                     "remotes and gh may pick another one as the base. Name origin: "
+                     f"gh pr create --repo {route.origin_repo} (or set the default once: "
+                     f"gh repo set-default {route.origin_repo}).")
     # Without --head, gh pushes the current branch for the PR.
     if created.head is None and not moved and fix_route.local_branch(directory) == route.default_branch:
         return _deny(f"vcs: {repo} integrates through pull requests, so open the pull request from a branch, "
@@ -292,28 +330,46 @@ def _pr_create_decision(route: fix_route.Route, created: GhCreate, directory: Pa
     return None
 
 
-def _pr_targets(created: GhCreate, directory: Path, gh_repo: object) -> list[str]:
+def _pr_targets(created: GhCreate, env: object, directory: Path) -> list[str]:
     """What ``gh pr create`` targets, as gh resolves it: ``--repo``, else ``GH_REPO``, else the default."""
     if created.repo is not None:
         return [created.repo]
-    env = os.environ.get("GH_REPO") if gh_repo is _INHERIT else gh_repo
     if env:
         return [str(env)]
     return _gh_default_targets(directory)
 
 
+def _several_github_repos(directory: Path) -> bool:
+    """True when the remotes point at more than one GitHub repository."""
+    result = fix_route.git(directory, "remote")
+    if result.returncode != 0:
+        return False
+    slugs = set()
+    for name in result.stdout.split():
+        url = fix_route.remote_url(directory, name)
+        slug = fix_route.github_slug(url) if url else None
+        if slug:
+            slugs.add(slug.lower())
+    return len(slugs) > 1
+
+
 def _gh_default_targets(directory: Path) -> list[str]:
-    """``gh repo set-default`` records its choice as ``remote.<name>.gh-resolved``: ``base`` or ``owner/repo``."""
+    """``gh repo set-default`` records its choice as ``remote.<name>.gh-resolved``: ``base`` or ``owner/repo``.
+
+    gh reads the entry only for a remote that exists, so a stale one is not a default.
+    """
     result = fix_route.git(directory, "config", "--get-regexp", r"^remote\..*\.gh-resolved$")
     if result.returncode != 0:
         return []
     targets = []
     for line in result.stdout.splitlines():
         key, _, value = line.partition(" ")
-        value = value.strip()
-        if value == "base":
-            name = key.removeprefix("remote.").removesuffix(".gh-resolved")
-            value = fix_route.remote_url(directory, name) or ""
+        name = key.removeprefix("remote.").removesuffix(".gh-resolved")
+        # ``git remote get-url`` answers with the name for a section that has no url, so ask the config.
+        configured = fix_route.git(directory, "config", "--get", f"remote.{name}.url")
+        if configured.returncode != 0 or not configured.stdout.strip():
+            continue
+        value = fix_route.remote_url(directory, name) if value.strip() == "base" else value.strip()
         if value:
             targets.append(value)
     return targets
@@ -356,12 +412,84 @@ def _on_default_branch(directory: Path, default: str) -> bool:
     return False
 
 
-def _replays_commits(replay: Replay) -> bool:
-    """False for aborting, quitting, help, and a pull or merge that can only fast-forward."""
-    args = replay.args[:replay.args.index("--")] if "--" in replay.args else replay.args
-    if any(token in _INERT for token in args):
+def _flags(replay: Replay) -> tuple[str, ...]:
+    return replay.args[:replay.args.index("--")] if "--" in replay.args else replay.args
+
+
+def _inert(replay: Replay) -> bool:
+    """True for aborting, quitting and help, which replay nothing."""
+    return any(token in _INERT for token in _flags(replay))
+
+
+def _replays_commits(replay: Replay, default: str | None) -> bool:
+    """False for aborting, quitting, help, and a fast-forward from origin's ``default`` branch.
+
+    Any other merge or pull can bring unpublished commits onto the branch, ``--ff-only`` or not:
+    ``git merge --ff-only feature`` advances the default branch to a commit nobody reviewed.
+    """
+    if _inert(replay):
         return False
-    return not (replay.subcommand in ("merge", "pull") and _fast_forward_only(args))
+    if replay.subcommand not in ("merge", "pull") or not _fast_forward_only(_flags(replay)):
+        return True
+    return not _syncs_from_origin_default(replay, default)
+
+
+def _operands(args: tuple[str, ...]) -> list[str]:
+    """Words that are not options. An option's value counts as an operand, which only ever denies."""
+    found: list[str] = []
+    for index, token in enumerate(args):
+        if token == "--":
+            found.extend(args[index + 1:])
+            break
+        if not token.startswith("-"):
+            found.append(token)
+    return found
+
+
+def _syncs_from_origin_default(replay: Replay, default: str | None) -> bool:
+    """``git pull`` with no operands or ``origin <default>``; ``git merge`` of origin's default branch."""
+    operands = _operands(replay.args)
+    if replay.subcommand == "pull":
+        return not operands or (default is not None and operands == ["origin", default])
+    if default is None or len(operands) != 1:
+        return False
+    # Resolving the operand as git does catches a local branch named ``origin/<default>``,
+    # which wins over the remote-tracking ref, and ``@{u}``, which is only origin's when it is.
+    found = fix_route.git(replay.directory, "rev-parse", "--symbolic-full-name", operands[0])
+    return found.returncode == 0 and found.stdout.strip() == f"refs/remotes/origin/{default}"
+
+
+def _replays_onto_default(replay: Replay, default: str) -> bool:
+    """True when the replay rewrites or advances ``default``: the checked-out branch, or a rebase's branch operand."""
+    if replay.subcommand == "rebase":
+        branch = _rebase_branch(replay.args)
+        if branch is not None:
+            return branch in {default, f"refs/heads/{default}"}
+    return _on_default_branch(replay.directory, default)
+
+
+def _rebase_branch(args: tuple[str, ...]) -> str | None:
+    """The ``<branch>`` of ``git rebase [options] <upstream> <branch>``, or of ``--root <branch>``."""
+    positionals: list[str] = []
+    root = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            positionals.extend(args[index + 1:])
+            break
+        if token == "--root":
+            root = True
+        if token in _REBASE_VALUES:
+            index += 2
+            continue
+        if not token.startswith("-"):
+            positionals.append(token)
+        index += 1
+    position = 0 if root else 1
+    if len(positionals) <= position or positionals[position] == "HEAD":
+        return None
+    return positionals[position]
 
 
 def _fast_forward_only(args: tuple[str, ...]) -> bool:
@@ -464,6 +592,9 @@ def _cached_route(directory: Path, cache: dict[str, object]) -> object:
             except fix_route.DefaultBranchUnknown as error:
                 # A configured route that needs the default fails closed; any other route stays open.
                 found = error if error.route else None
+            except fix_route.ConfiguredRouteError as error:
+                # An explicit route that cannot be applied: nothing may slip past it.
+                found = error
             except Exception:
                 # Still a work tree: rule (c) can reject a push to upstream without a route.
                 found = None
@@ -711,7 +842,19 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
         if token == "--":
             positionals.extend(argv[index + 1:])
             break
-        if token in {"-R", "--repo"}:
+        if token.startswith("-") and not token.startswith("--"):
+            group = _gh_short_group(argv, index)
+            if group is _AMBIGUOUS:
+                return _AMBIGUOUS
+            found_repo, found_head, used = group
+            if found_repo is not None:
+                repo = found_repo
+                saw_repo = True
+            if found_head is not None:
+                head = found_head
+            index += used
+            continue
+        if token == "--repo":
             if index + 1 >= len(argv):
                 return _AMBIGUOUS
             repo = argv[index + 1]
@@ -723,12 +866,7 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
             saw_repo = True
             index += 1
             continue
-        if token.startswith("-R") and len(token) > 2:
-            repo = token[2:]
-            saw_repo = True
-            index += 1
-            continue
-        if token in {"-H", "--head"}:
+        if token == "--head":
             if index + 1 >= len(argv):
                 return _AMBIGUOUS
             head = argv[index + 1]
@@ -736,10 +874,6 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
             continue
         if token.startswith("--head="):
             head = token.split("=", 1)[1]
-            index += 1
-            continue
-        if token.startswith("-H") and len(token) > 2:
-            head = token[2:]
             index += 1
             continue
         if token.startswith("--") and "=" in token:
@@ -758,6 +892,27 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
     if positionals[:2] != ["pr", "create"]:
         return None
     return GhCreate(repo if saw_repo else None, head)
+
+
+def _gh_short_group(argv: list[str], index: int) -> tuple[str | None, str | None, int] | object:
+    """Read the short options in ``argv[index]``: ``(repo, head, words used)``, None for a value not given.
+
+    A value-taking letter ends the bundle: ``-fRowner/repo`` and ``-fR owner/repo`` both set the repo,
+    and, as in pflag, a single ``=`` right after the letter is not part of the value.
+    """
+    token = argv[index]
+    for position, letter in enumerate(token[1:], start=1):
+        if letter not in _GH_SHORT_VALUES:
+            continue
+        value: str | None = token[position + 1:].removeprefix("=") if token[position + 1:] else None
+        used = 1
+        if value is None:
+            if index + 1 >= len(argv):
+                return _AMBIGUOUS
+            value = argv[index + 1]
+            used = 2
+        return (value if letter == "R" else None), (value if letter == "H" else None), used
+    return None, None, 1
 
 
 def _tokenize(command: str) -> list[str] | None:

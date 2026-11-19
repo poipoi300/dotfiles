@@ -158,11 +158,21 @@ prints it, for debugging). The user's own repository can opt into pull requests 
 config. Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
 branch of a fork, someone else's repository, or a `pr` repository, and a push or pull request that
 misses the route. In a `pr` repository it also denies a merge, cherry-pick, rebase, `am`, revert
-or non fast-forward pull on the default branch (mid-operation too), and a `gh pr create` that
-targets another repository or runs on the default branch; a configured route whose default
-branch is unreadable denies instead of allowing. Each reason is the whole instruction; after an
-upstream PR opens, a Bash PostToolUse note says to carry it or to ask about carrying. It runs offline, allows what it
-can't classify, and runs before Codex rewrites the command through RTK.
+or pull on the default branch (mid-operation too) unless it only fast-forwards from origin's
+default branch (`git pull --ff-only`, optionally `origin <default>`; `git merge --ff-only
+origin/<default>`), and a `gh pr create` that targets another repository, runs on the default
+branch, or leaves gh to pick the base among several GitHub remotes without `--repo <origin>`.
+A configured route never guesses origin's default branch: when `origin/HEAD` is missing it
+denies and says to run `git remote set-head origin -a`. An explicit route that cannot be applied
+(an invalid `agents.route`, or `upstream` without its remote or refs) denies every mutation with
+the router's error instead of allowing. Each reason is the whole instruction; after an
+upstream PR opens, a Bash PostToolUse note says to carry it or to ask about carrying. It runs
+offline, allows what it can't classify without a configured route, and runs before Codex rewrites
+the command through RTK.
+
+Threat model: the guard steers well-meaning agents away from the wrong integration route. It is
+not a security boundary against a deliberately crafted command (an option value that looks like a
+flag, shell variable state, an overridden `GH_HOST`), and it is not a Git or gh parser.
 Claude's RTK rewrite stays its own `rtk hook claude` hook. Native hook trust and
 lifecycle delivery still require acceptance in a fresh session. Shared script
 changes use the same path in both providers; do not maintain second provider copies.

@@ -284,6 +284,46 @@ class RouteTests(RepoFixture, unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("git remote set-head origin -a", stderr)
 
+    def test_origin_default_reads_the_full_head_symref_even_when_a_branch_shadows_it(self):
+        work = self.repository(fork=False, name="shadowed-head", branch="develop")
+        self.git("-C", str(work), "branch", "origin/develop")
+        self.assertEqual(fix_route.remote_default(work, "origin"), "develop")
+        self.assertEqual(fix_route.remote_default(work, "origin", guess=False), "develop")
+
+    def test_a_configured_route_never_guesses_the_default_while_unconfigured_routing_still_does(self):
+        work = self.repository(fork=True, name="guess-main", branch="develop")
+        self.git("-C", str(work), "update-ref", "refs/remotes/origin/main", "refs/remotes/origin/develop")
+        self.git("-C", str(work), "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+        self.assertEqual(fix_route.remote_default(work, "origin"), "main")
+        self.assertIsNone(fix_route.remote_default(work, "origin", guess=False))
+        for route in ("pr", "upstream", "upstream+carry"):
+            self.git("-C", str(work), "config", "agents.route", route)
+            with self.assertRaises(fix_route.DefaultBranchUnknown) as raised:
+                fix_route.decide(work, offline=True)
+            self.assertEqual(raised.exception.route, route)
+        self.git("-C", str(work), "config", "agents.route", "direct")
+        self.assertEqual(fix_route.decide(work, offline=True).default_branch, "main")
+
+    def test_a_configured_route_that_cannot_be_applied_raises_a_configured_route_error(self):
+        work = self.repository(fork=False, name="bad-config")
+        self.git("-C", str(work), "config", "agents.route", "prr")
+        with self.assertRaises(fix_route.ConfiguredRouteError) as invalid:
+            fix_route.decide(work, offline=True)
+        self.assertIn("'prr'", str(invalid.exception))
+        self.git("-C", str(work), "config", "agents.route", "upstream")
+        with self.assertRaises(fix_route.ConfiguredRouteError) as lone:
+            fix_route.decide(work, offline=True)
+        self.assertIn("no upstream remote", str(lone.exception))
+        fork = self.repository(ahead=False, name="bad-refs")
+        self.git("-C", str(fork), "symbolic-ref", "-d", "refs/remotes/upstream/HEAD")
+        self.git("-C", str(fork), "update-ref", "-d", "refs/remotes/upstream/main")
+        with self.assertRaises(fix_route.RouteError) as unconfigured:
+            fix_route.decide(fork, offline=True)
+        self.assertNotIsInstance(unconfigured.exception, fix_route.ConfiguredRouteError)
+        self.git("-C", str(fork), "config", "agents.route", "upstream+carry")
+        with self.assertRaises(fix_route.ConfiguredRouteError):
+            fix_route.decide(fork, offline=True)
+
     def test_missing_repo_or_origin_exits_2(self):
         missing, code = self.cli(self.root / "absent", "--offline")
         self.assertEqual(code, 2)
