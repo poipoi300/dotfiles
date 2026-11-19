@@ -6,8 +6,7 @@ requires    = ["audio"]
 pacman = ["xwayland-satellite", "xdg-desktop-portal-gnome", "xdg-desktop-portal-gtk",
           "polkit-gnome", "qt5-wayland", "qt6-wayland", "cliphist", "fuzzel", "matugen", "cava",
           "networkmanager", "network-manager-applet", "ghostty", "ttf-firacode-nerd",
-          "quickshell", "xdg-utils", "inter-font"]
-aur    = ["dms-shell-bin"]
+          "quickshell", "dux-shell", "dux-gop", "xdg-utils", "inter-font"]
 local  = ["niri-poipoi"]   # niri + hide-cursor/show-cursor actions (autoscroll) + virtual outputs (PR #3800)
 
 [units]
