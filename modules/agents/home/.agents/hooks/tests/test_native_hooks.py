@@ -191,12 +191,12 @@ class NativeHookTests(unittest.TestCase):
         payload = self.payload("PreToolUse", tool_name="Bash", tool_input={"command": "git status"})
         home = self.directory / "home"
         (home / ".agents/hooks").mkdir(parents=True)
-        for name in ("native.py", "behavior.py"):
+        for name in ("native.py", "behavior.py", "vcs_guard.py", "fix_route.py"):
             shutil.copy2(ROOT / "hooks" / name, home / ".agents/hooks" / name)
         result = subprocess.run(["sh", "-c", command], check=False, input=json.dumps(payload), capture_output=True,
                                 text=True, timeout=8, env={**os.environ, "HOME": str(home)})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {})  # claude PreToolUse is RTK's own hook, not this adapter
+        self.assertEqual(json.loads(result.stdout), {})  # git status is allowed; Claude does not rewrite it
 
     def test_malformed_cli_input_does_not_echo_sensitive_data(self):
         result = subprocess.run([sys.executable, "-I", "-B", str(ROOT / "hooks/native.py"), "codex"],

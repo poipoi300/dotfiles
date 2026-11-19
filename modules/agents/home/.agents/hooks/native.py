@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "hooks"))
 sys.path.insert(0, str(ROOT / "usage"))
 
 import behavior
+import vcs_guard
 
 try:
     import budget  # usage/budget.py ships in the private module; the hooks work without it
@@ -26,6 +27,13 @@ except ImportError:
 def dispatch(provider: str, payload: dict) -> dict:
     event = payload.get("hook_event_name")
     if event == "PreToolUse":
+        # The route guard runs for both providers. A deny wins; Codex still rewrites what it allows.
+        try:
+            denied = vcs_guard.guard(payload)
+        except Exception:
+            denied = None
+        if denied:
+            return denied
         return behavior.rewrite_shell(payload) if provider == "codex" else {}
     if event not in ("SessionStart", "PostToolUse", "Stop"):
         return {}
