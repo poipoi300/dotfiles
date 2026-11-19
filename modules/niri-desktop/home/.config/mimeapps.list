@@ -1,5 +1,5 @@
 [Default Applications]
-inode/directory=org.kde.dolphin.desktop
+inode/directory=io.github.lgse.Strata.desktop
 text/plain=dev.zed.Zed.desktop
 application/json=dev.zed.Zed.desktop
 text/html=zen.desktop
@@ -24,5 +24,5 @@ x-scheme-handler/grokbot=grok-bot.desktop
 x-scheme-handler/sand=grok-bot.desktop
 
 [Added Associations]
-inode/directory=org.kde.dolphin.desktop;
+inode/directory=io.github.lgse.Strata.desktop;
 text/plain=dev.zed.Zed.desktop;
