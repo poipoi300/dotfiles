@@ -158,8 +158,6 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         work = self.repository(fork=False, name="own-pr")
         self.assert_deny("gh pr create", work, "takes no PRs")
         self.git("-C", str(work), "config", "agents.route", "pr")
-        self.assert_allow("gh pr create", work)
-        self.assert_allow("gh pr create --repo solo-owner/widget --fill", work)
         self.assert_allow("git push -u origin feature", work)
         self.assert_allow("git push origin HEAD:feature", work)
         self.assert_allow("git push --dry-run origin main", work)
@@ -169,6 +167,8 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
             self.assertIn("git push -u origin HEAD", reason)
             self.assertIn("gh pr create", reason)
         self.git("-C", str(work), "switch", "-c", "feature")
+        self.assert_allow("gh pr create", work)
+        self.assert_allow("gh pr create --repo solo-owner/widget --fill", work)
         self.assert_allow("git push", work)
         self.assert_allow("git push origin feature", work)
         self.assert_deny("git push origin main", work, "never push its main")
@@ -189,12 +189,172 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.assertIn("gh pr create", reason)
         self.assert_allow("git commit --dry-run -m x", work)
         self.assert_allow("git switch -c fix && git commit -m x", work)
-        git_dir = Path(self.git("-C", str(work), "rev-parse", "--absolute-git-dir").stdout.strip())
-        (git_dir / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
-        self.assert_allow("git commit --no-edit", work)
-        (git_dir / "MERGE_HEAD").unlink()
         self.git("-C", str(work), "switch", "-c", "feature")
         self.assert_allow("git commit -m x", work)
+
+    def pr_repository(self, name, branch="main"):
+        work = self.repository(fork=False, name=name, branch=branch)
+        self.git("-C", str(work), "config", "agents.route", "pr")
+        return work
+
+    def git_dir(self, work):
+        return Path(self.git("-C", str(work), "rev-parse", "--absolute-git-dir").stdout.strip())
+
+    def test_pr_route_denies_a_commit_on_the_default_branch_even_mid_merge_or_rebase(self):
+        work = self.pr_repository("pr-in-progress")
+        git_dir = self.git_dir(work)
+        self.git("-C", str(work), "branch", "feature")
+        for name in ("MERGE_HEAD", "SQUASH_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+            path = git_dir / name
+            if name.startswith("rebase"):
+                path.mkdir()
+            else:
+                path.write_text("0" * 40 + "\n", encoding="utf-8")
+            self.assert_deny("git commit --no-edit", work, "so nothing is committed on its main")
+            self.git("-C", str(work), "symbolic-ref", "HEAD", "refs/heads/feature")
+            self.assert_allow("git commit --no-edit", work)
+            self.git("-C", str(work), "symbolic-ref", "HEAD", "refs/heads/main")
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
+
+    def test_pr_route_denies_operations_that_replay_commits_onto_the_default_branch(self):
+        work = self.pr_repository("pr-replay")
+        for command in ("git merge feature", "git merge --no-ff feature", "git merge --continue",
+                        "git cherry-pick abc123", "git cherry-pick --continue", "git rebase --continue",
+                        "git rebase --skip", "git rebase origin/main", "git am patch.mbox", "git am --continue",
+                        "git revert HEAD", "git revert --continue", "git pull", "git pull origin main",
+                        "git pull --rebase", "git pull --no-ff", "git pull --ff-only --rebase",
+                        "git merge --ff-only --no-ff feature", "git -C . merge feature",
+                        "cd . && git merge feature", "rtk git merge feature"):
+            reason = self.assert_deny(command, work, "vcs: solo-owner/widget integrates through pull requests, "
+                                                     "so nothing is merged, cherry-picked, rebased, applied, "
+                                                     "reverted or pulled onto its main.")
+            self.assertIn("git switch -c <branch>", reason)
+            self.assertIn("git pull --ff-only", reason)
+        for command in ("git merge --abort", "git cherry-pick --abort", "git rebase --abort", "git am --abort",
+                        "git revert --quit", "git rebase --quit", "git am --show-current-patch",
+                        "git merge --help", "git pull --ff-only", "git pull --ff-only origin main",
+                        "git merge --ff-only origin/main", "git pull --ff-only --no-rebase", "git status",
+                        "git log --merge", "git switch -c fix && git merge feature"):
+            self.assert_allow(command, work)
+        self.git("-C", str(work), "switch", "-c", "feature")
+        for command in ("git merge main", "git cherry-pick abc123", "git rebase main", "git pull",
+                        "git revert HEAD", "git am patch.mbox", "git rebase --continue"):
+            self.assert_allow(command, work)
+
+    def test_replaying_commits_onto_the_default_branch_stays_allowed_for_the_other_routes(self):
+        direct = self.repository(fork=False, name="replay-direct")
+        fork = self.repository(ahead=False, name="replay-fork")
+        theirs = self.repository(fork=False, name="replay-theirs")
+        self.write_hosts_user("other-person")
+        for work in (direct, fork, theirs):
+            for command in ("git merge feature", "git cherry-pick abc123", "git rebase --continue",
+                            "git pull", "git am patch.mbox", "git revert HEAD"):
+                self.assert_allow(command, work)
+
+    def test_pr_route_treats_a_rebase_of_the_default_branch_as_being_on_it(self):
+        work = self.pr_repository("pr-rebasing")
+        git_dir = self.git_dir(work)
+        self.git("-C", str(work), "switch", "--detach")
+        for name in ("rebase-merge", "rebase-apply"):
+            state = git_dir / name
+            state.mkdir()
+            (state / "head-name").write_text("refs/heads/main\n", encoding="utf-8")
+            for command in ("git rebase --continue", "git commit --no-edit"):
+                self.assert_deny(command, work, "integrates through pull requests")
+            (state / "head-name").write_text("refs/heads/feature\n", encoding="utf-8")
+            for command in ("git rebase --continue", "git commit --no-edit"):
+                self.assert_allow(command, work)
+            (state / "head-name").unlink()
+            state.rmdir()
+        for command in ("git rebase --continue", "git commit --no-edit"):
+            self.assert_allow(command, work)
+
+    def test_a_tag_named_like_the_default_branch_does_not_hide_the_branch(self):
+        pr = self.pr_repository("tagged-pr")
+        fork = self.repository(ahead=False, name="tagged-fork")
+        for work, fragment in ((pr, "integrates through pull requests"), (fork, "this is a fork")):
+            self.git("-C", str(work), "tag", "main")
+            self.assert_deny("git commit -m x", work, fragment)
+        self.assert_deny("git push", pr, "never push its main")
+        self.git("-C", str(pr), "switch", "-c", "feature")
+        self.assert_allow("git commit -m x", pr)
+
+    def test_a_configured_route_denies_mutations_while_the_default_branch_is_unknown(self):
+        work = self.pr_repository("pr-no-head", branch="develop")
+        self.git("-C", str(work), "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+        self.git("-C", str(work), "switch", "-c", "feature")
+        for command in ("git commit -m x", "git push -u origin feature", "git push", "gh pr create",
+                        "git merge main"):
+            reason = self.assert_deny(command, work, "vcs: the default branch of origin is unknown")
+            self.assertIn("git remote set-head origin -a", reason)
+        for command in ("git push --dry-run origin feature", "git commit --dry-run -m x", "git status",
+                        "git merge --abort"):
+            self.assert_allow(command, work)
+        self.git("-C", str(work), "remote", "set-head", "origin", "develop")
+        self.assert_allow("git commit -m x", work)
+        self.assert_allow("git push -u origin feature", work)
+
+    def test_unknown_default_stays_open_without_a_route_that_needs_it(self):
+        unconfigured = self.repository(fork=False, name="open-no-head", branch="develop")
+        direct = self.pr_repository("open-direct", branch="develop")
+        self.git("-C", str(direct), "config", "agents.route", "direct")
+        for work in (unconfigured, direct):
+            self.git("-C", str(work), "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+            self.assert_allow("git commit -m x", work)
+            self.assert_allow("git push origin develop", work)
+
+    def test_pr_route_pr_creation_must_target_origin_from_a_branch(self):
+        work = self.pr_repository("pr-target")
+        self.assert_deny("gh pr create", work, "so open the pull request from a branch")
+        self.assert_deny("gh pr create --fill", work, "git switch -c <branch>")
+        self.assert_allow("gh pr create --head feature --base main", work)
+        self.assert_allow("git switch -c feature && gh pr create", work)
+        self.git("-C", str(work), "switch", "-c", "feature")
+        for command in ("gh pr create", "gh pr create --repo solo-owner/widget", "gh -R solo-owner/widget pr create",
+                        "gh pr create -R https://github.com/Solo-Owner/widget.git",
+                        "GH_REPO=solo-owner/widget gh pr create", "export GH_REPO=solo-owner/widget && gh pr create",
+                        "GH_REPO=other-owner/widget gh pr create --repo solo-owner/widget",
+                        "export GH_REPO=other-owner/widget && unset GH_REPO && gh pr create"):
+            self.assert_allow(command, work)
+        for command in ("gh pr create --repo other-owner/widget", "gh pr create -R other-owner/widget",
+                        "gh -R other-owner/widget pr create", "gh pr create --repo=other-owner/widget",
+                        "GH_REPO=other-owner/widget gh pr create", "GH_REPO=other-owner/widget rtk gh pr create",
+                        "export GH_REPO=other-owner/widget && gh pr create",
+                        "GH_REPO=solo-owner/widget gh pr create --repo other-owner/widget"):
+            reason = self.assert_deny(command, work, "vcs: solo-owner/widget integrates through pull requests, "
+                                                     "so a PR goes to it, not to other-owner/widget.")
+            self.assertIn("gh pr create", reason)
+        with patch.dict(os.environ, {"GH_REPO": "other-owner/widget"}):
+            self.assert_deny("gh pr create", work, "not to other-owner/widget")
+            self.assert_allow("gh pr create --repo solo-owner/widget", work)
+
+    def test_pr_route_pr_creation_honours_gh_repo_set_default(self):
+        work = self.pr_repository("pr-default")
+        self.git("-C", str(work), "switch", "-c", "feature")
+        self.git("-C", str(work), "remote", "add", "upstream", "https://github.com/other-owner/widget.git")
+        self.assert_allow("gh pr create", work)
+        self.git("-C", str(work), "config", "remote.origin.gh-resolved", "base")
+        self.assert_allow("gh pr create", work)
+        self.git("-C", str(work), "config", "--unset", "remote.origin.gh-resolved")
+        self.git("-C", str(work), "config", "remote.upstream.gh-resolved", "base")
+        self.assert_deny("gh pr create", work, "not to other-owner/widget.")
+        self.assert_allow("gh pr create --repo solo-owner/widget", work)
+        self.git("-C", str(work), "config", "remote.upstream.gh-resolved", "solo-owner/widget")
+        self.assert_allow("gh pr create", work)
+        self.git("-C", str(work), "config", "remote.upstream.gh-resolved", "third-owner/widget")
+        self.assert_deny("gh pr create", work, "not to third-owner/widget.")
+
+    def test_pr_route_requires_repository_local_config(self):
+        work = self.repository(fork=False, name="global-pr")
+        self.git("config", "--global", "agents.route", "pr")
+        self.assert_allow("git commit -m x", work)
+        self.assert_allow("git push origin main", work)
+        self.assert_deny("gh pr create", work, "takes no PRs")
+        self.git("-C", str(work), "config", "--local", "agents.route", "pr")
+        self.assert_deny("git commit -m x", work, "integrates through pull requests")
 
     def test_unknown_login_allows_every_command(self):
         work = self.repository(fork=False, name="no-login")

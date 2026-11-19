@@ -154,11 +154,14 @@ for both providers. `hooks/fix_route.py` decides where a change goes: a direct p
 user's own repository, an upstream pull request, that pull request plus a carry onto the fork's
 default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
 prints it, for debugging). The user's own repository can opt into pull requests with
-`git config agents.route pr`; only configuration selects `pr`. Agents aren't told about routes:
-`hooks/vcs_guard.py` denies a commit on the default branch of a fork, someone else's repository,
-or a `pr` repository, and a push or pull request that
-misses the route, with a reason that is the whole instruction; after an upstream PR opens, a
-Bash PostToolUse note says to carry it or to ask about carrying. It runs offline, allows what it
+`git config agents.route pr`; only that repository's own config selects `pr`, never the global
+config. Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
+branch of a fork, someone else's repository, or a `pr` repository, and a push or pull request that
+misses the route. In a `pr` repository it also denies a merge, cherry-pick, rebase, `am`, revert
+or non fast-forward pull on the default branch (mid-operation too), and a `gh pr create` that
+targets another repository or runs on the default branch; a configured route whose default
+branch is unreadable denies instead of allowing. Each reason is the whole instruction; after an
+upstream PR opens, a Bash PostToolUse note says to carry it or to ask about carrying. It runs offline, allows what it
 can't classify, and runs before Codex rewrites the command through RTK.
 Claude's RTK rewrite stays its own `rtk hook claude` hook. Native hook trust and
 lifecycle delivery still require acceptance in a fresh session. Shared script

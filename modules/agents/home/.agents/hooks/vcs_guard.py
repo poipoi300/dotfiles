@@ -4,9 +4,10 @@ PreToolUse denies a commit, push, or ``gh pr create`` that misses the route; eac
 the whole instruction for an agent that has never heard of routes. PostToolUse reminds the
 agent to carry a change, or to ask about carrying it, after its upstream PR opens.
 
-A repository configured ``agents.route pr`` is the user's own and integrates through pull
-requests: the guard allows ``gh pr create`` and feature-branch pushes, and denies a commit on
-or push to the default branch.
+A repository configured ``agents.route pr`` (in its own config) is the user's own and integrates
+through pull requests: the guard allows ``gh pr create`` onto that repository from a branch, and
+feature-branch pushes. It denies a commit, merge, cherry-pick, rebase, ``am``, revert or non
+fast-forward pull on the default branch, even mid-operation, and a push to it.
 
 Offline only: a hook has a few seconds and must not call the network. Anything this module
 cannot parse, or any repository it cannot classify, is allowed.
@@ -38,6 +39,12 @@ _GH_VALUES = {
 _IN_PROGRESS = ("MERGE_HEAD", "SQUASH_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
 # Subcommands that can change the checked-out branch before a later command in the same script runs.
 _MOVES = {"switch", "checkout", "worktree", "branch", "rebase", "reset", "stash", "bisect"}
+# Subcommands that create or replay commits onto the checked-out branch, besides ``commit``.
+_REPLAYS = {"merge", "cherry-pick", "rebase", "am", "revert", "pull"}
+# Flags that leave an in-progress replay or print help instead of replaying anything.
+_INERT = {"--abort", "--quit", "--show-current-patch", "--edit-todo", "-h", "--help"}
+_GIT_MUTATION = re.compile(r"\b(?:push|commit|merge|cherry-pick|rebase|am|revert|pull)\b")
+_INHERIT = object()
 _COMMIT_VALUES = {"-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message",
                   "--fixup", "--squash", "--author", "--date", "-t", "--template", "--cleanup",
                   "--trailer", "--pathspec-from-file", "-S", "--gpg-sign"}
@@ -58,11 +65,19 @@ class Push:
 @dataclass(frozen=True)
 class GhCreate:
     repo: str | None
+    head: str | None = None
 
 
 @dataclass(frozen=True)
 class Commit:
     directory: Path
+
+
+@dataclass(frozen=True)
+class Replay:
+    directory: Path
+    subcommand: str
+    args: tuple[str, ...]
 
 
 def guard(payload: dict) -> dict | None:
@@ -89,8 +104,8 @@ def _guard(payload: dict) -> dict | None:
         return None
     cache: dict[str, object] = {}
     moved = False
-    for cwd, argv in script:
-        decision = _consider(cwd, argv, cache, moved)
+    for cwd, argv, gh_repo in script:
+        decision = _consider(cwd, argv, cache, moved, gh_repo)
         if decision:
             return decision
         # After a branch switch the current branch is unknown until the command runs.
@@ -117,7 +132,7 @@ def _remind(payload: dict) -> dict | None:
     raw_cwd = payload.get("cwd")
     base = Path(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else None
     cache: dict[str, object] = {}
-    for cwd, argv in script:
+    for cwd, argv, _gh_repo in script:
         created = parse_gh(argv)
         if cwd is None or not isinstance(created, GhCreate) or created.repo is None:
             continue
@@ -149,7 +164,7 @@ def _remind(payload: dict) -> dict | None:
     return None
 
 
-def _script(payload: dict) -> list[tuple[Path | None, list[str]]] | None:
+def _script(payload: dict) -> list[tuple[Path | None, list[str], object]] | None:
     if payload.get("tool_name") not in (None, "Bash"):
         return None
     tool_input = payload.get("tool_input")
@@ -160,29 +175,34 @@ def _script(payload: dict) -> list[tuple[Path | None, list[str]]] | None:
         return None
     raw_cwd = payload.get("cwd")
     base = Path(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else Path.cwd()
-    return parse_script(command, base)
+    return _parse_script(command, base)
 
 
 def _may_match(command: str) -> bool:
-    if "git" in command and ("push" in command or "commit" in command):
+    if "git" in command and _GIT_MUTATION.search(command):
         return True
     return "gh" in command and "pr" in command and "create" in command
 
 
-def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved: bool = False) -> dict | None:
+def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved: bool = False,
+              gh_repo: object = _INHERIT) -> dict | None:
     if not argv or cwd is None:
         return None
     push = parse_push(argv, cwd)
     commit = parse_commit(argv, cwd) if push is None else None
-    created = None if push is not None or commit is not None else parse_gh(argv)
-    if push is None and commit is None and created is None:
+    replay = parse_replay(argv, cwd) if push is None and commit is None else None
+    created = None if push is not None or commit is not None or replay is not None else parse_gh(argv)
+    if push is None and commit is None and replay is None and created is None:
         return None
-    if _AMBIGUOUS in (push, commit, created):
+    if _AMBIGUOUS in (push, commit, replay, created):
         return None
-    directory = push.directory if isinstance(push, Push) else commit.directory if isinstance(commit, Commit) else cwd
+    directory = (push.directory if isinstance(push, Push) else commit.directory if isinstance(commit, Commit)
+                 else replay.directory if isinstance(replay, Replay) else cwd)
     route = _cached_route(directory, cache)
     if route is _NOT_A_REPO:
         return None
+    if isinstance(route, fix_route.DefaultBranchUnknown):
+        return _unknown_default(route, push, replay)
     # Login unknown: nothing here is a clear violation. A crashed decide() is not this route,
     # so the never-push-upstream rule below still applies to that case.
     if isinstance(route, fix_route.Route) and route.route == "unknown":
@@ -192,6 +212,12 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
         if moved or not _commit_misses(known, directory):
             return None
         return _deny(_commit_reason(known, directory))
+    if isinstance(replay, Replay):
+        if moved or known is None or known.route != "pr" or not _replays_commits(replay):
+            return None
+        if not _on_default_branch(directory, known.default_branch):
+            return None
+        return _deny(_replay_reason(known))
     if isinstance(push, Push):
         if push.dry_run:
             return None
@@ -212,8 +238,10 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
         return None
     if not isinstance(created, GhCreate) or known is None:
         return None
-    if known.route in ("external", "pr"):
+    if known.route == "external":
         return None
+    if known.route == "pr":
+        return _pr_create_decision(known, created, directory, moved, gh_repo)
     if known.route == "direct":
         if known.source != "config" and created.repo is not None and known.origin_repo \
                 and not fix_route.same_repo(created.repo, known.origin_repo):
@@ -231,10 +259,73 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
     return None
 
 
+def _unknown_default(error: fix_route.DefaultBranchUnknown, push: object, replay: object) -> dict | None:
+    """A configured route is stated in terms of origin's default branch, which cannot be read.
+
+    Without it a commit on the default branch looks like any other, so deny rather than allow.
+    """
+    if isinstance(push, Push) and push.dry_run:
+        return None
+    if isinstance(replay, Replay) and (error.route != "pr" or not _replays_commits(replay)):
+        return None
+    return _deny(f"vcs: the default branch of origin is unknown, so the {error.route} route can't tell it from "
+                 "a feature branch. Establish it first: git fetch origin && git remote set-head origin -a "
+                 "(or git remote set-head origin <branch>), then retry.")
+
+
+def _pr_create_decision(route: fix_route.Route, created: GhCreate, directory: Path, moved: bool,
+                        gh_repo: object) -> dict | None:
+    """``gh pr create`` in a ``pr`` repository goes to origin's repository, from a branch."""
+    repo = route.origin_repo or "this repository"
+    for target in _pr_targets(created, directory, gh_repo):
+        if route.origin_repo and fix_route.same_repo(target, route.origin_repo):
+            continue
+        shown = fix_route.github_slug(target) or target
+        return _deny(f"vcs: {repo} integrates through pull requests, so a PR goes to it, not to {shown}. "
+                     "Drop --repo/-R, GH_REPO and the gh default (gh repo set-default --unset), "
+                     "then run: gh pr create")
+    # Without --head, gh pushes the current branch for the PR.
+    if created.head is None and not moved and fix_route.local_branch(directory) == route.default_branch:
+        return _deny(f"vcs: {repo} integrates through pull requests, so open the pull request from a branch, "
+                     f"not from its {route.default_branch}. git switch -c <branch>, commit there, "
+                     "git push -u origin HEAD, then gh pr create.")
+    return None
+
+
+def _pr_targets(created: GhCreate, directory: Path, gh_repo: object) -> list[str]:
+    """What ``gh pr create`` targets, as gh resolves it: ``--repo``, else ``GH_REPO``, else the default."""
+    if created.repo is not None:
+        return [created.repo]
+    env = os.environ.get("GH_REPO") if gh_repo is _INHERIT else gh_repo
+    if env:
+        return [str(env)]
+    return _gh_default_targets(directory)
+
+
+def _gh_default_targets(directory: Path) -> list[str]:
+    """``gh repo set-default`` records its choice as ``remote.<name>.gh-resolved``: ``base`` or ``owner/repo``."""
+    result = fix_route.git(directory, "config", "--get-regexp", r"^remote\..*\.gh-resolved$")
+    if result.returncode != 0:
+        return []
+    targets = []
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        value = value.strip()
+        if value == "base":
+            name = key.removeprefix("remote.").removesuffix(".gh-resolved")
+            value = fix_route.remote_url(directory, name) or ""
+        if value:
+            targets.append(value)
+    return targets
+
+
 def _commit_misses(route: fix_route.Route | None, directory: Path) -> bool:
     """True when a commit would land on the default branch of a fork, someone else's repo, or a PR repo."""
     if route is None or route.route not in (*_FORK_ROUTES, "external", "pr"):
         return False
+    if route.route == "pr":
+        # No in-progress exception: nothing lands on a pr repository's default branch.
+        return _on_default_branch(directory, route.default_branch)
     branch = fix_route.local_branch(directory)
     if not branch or branch != fix_route.remote_default(directory, "origin"):
         return False
@@ -245,6 +336,56 @@ def _commit_misses(route: fix_route.Route | None, directory: Path) -> bool:
     # Resolving a merge, rebase, cherry-pick, or revert on the default branch is how a fork
     # carries a change or syncs with upstream.
     return not any((git_dir / name).exists() for name in _IN_PROGRESS)
+
+
+def _on_default_branch(directory: Path, default: str) -> bool:
+    """True when the checked-out branch, or the branch a rebase is replaying onto, is ``default``."""
+    branch = fix_route.local_branch(directory)
+    if branch is not None:
+        return branch == default
+    found = fix_route.git(directory, "rev-parse", "--absolute-git-dir")
+    if found.returncode != 0 or not found.stdout.strip():
+        return False
+    for state in ("rebase-merge", "rebase-apply"):
+        try:
+            name = (Path(found.stdout.strip()) / state / "head-name").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if name == f"refs/heads/{default}":
+            return True
+    return False
+
+
+def _replays_commits(replay: Replay) -> bool:
+    """False for aborting, quitting, help, and a pull or merge that can only fast-forward."""
+    args = replay.args[:replay.args.index("--")] if "--" in replay.args else replay.args
+    if any(token in _INERT for token in args):
+        return False
+    return not (replay.subcommand in ("merge", "pull") and _fast_forward_only(args))
+
+
+def _fast_forward_only(args: tuple[str, ...]) -> bool:
+    """``--ff-only`` that no later ``--ff``/``--no-ff`` or rebase flag undoes."""
+    only = rebases = False
+    for token in args:
+        if token == "--ff-only":
+            only = True
+        elif token in {"--ff", "--no-ff"}:
+            only = False
+        elif token in {"--rebase", "-r"} or (token.startswith("--rebase=") and token != "--rebase=false"):
+            rebases = True
+        elif token in {"--no-rebase", "--rebase=false"}:
+            rebases = False
+    return only and not rebases
+
+
+def _replay_reason(route: fix_route.Route) -> str:
+    repo = route.origin_repo or "this repository"
+    default = route.default_branch
+    return (f"vcs: {repo} integrates through pull requests, so nothing is merged, cherry-picked, rebased, "
+            f"applied, reverted or pulled onto its {default}. Create a branch first (git switch -c <branch>) "
+            "and do it there, push it (git push -u origin HEAD), and open a PR: gh pr create. "
+            f"To bring {default} up to date with origin: git pull --ff-only.")
 
 
 def _fork_default(route: fix_route.Route, directory: Path) -> str:
@@ -320,6 +461,9 @@ def _cached_route(directory: Path, cache: dict[str, object]) -> object:
         else:
             try:
                 found = fix_route.decide(directory, offline=True)
+            except fix_route.DefaultBranchUnknown as error:
+                # A configured route that needs the default fails closed; any other route stays open.
+                found = error if error.route else None
             except Exception:
                 # Still a work tree: rule (c) can reject a push to upstream without a route.
                 found = None
@@ -417,14 +561,26 @@ def parse_script(command: str, base: Path) -> list[tuple[Path | None, list[str]]
     ``&&``, ``||``, ``;``, and newlines. A heredoc body is not a command. ``pushd`` and
     ``popd`` make the directory unknown from there on.
     """
+    parsed = _parse_script(command, base)
+    return None if parsed is None else [(cwd, argv) for cwd, argv, _gh_repo in parsed]
+
+
+def _parse_script(command: str, base: Path) -> list[tuple[Path | None, list[str], object]] | None:
+    """``parse_script`` plus ``GH_REPO`` as each command sees it: a value, None (unset), or ``_INHERIT``.
+
+    The variable comes from an assignment in front of the command, or from an earlier
+    ``export``, ``unset`` or bare assignment. A bare assignment counts as exported: that errs on the
+    side of denying.
+    """
     stripped = _strip_heredocs(command)
     if stripped is None:
         return None
     tokens = _tokenize(stripped)
     if tokens is None or any(token in {"(", ")", "`"} for token in tokens):
         return None
-    commands: list[tuple[Path | None, list[str]]] = []
+    commands: list[tuple[Path | None, list[str], object]] = []
     cwd: Path | None = base
+    gh_repo: object = _INHERIT
     index = 0
     while index <= len(tokens):
         raw_pipeline: list[list[str]] = []
@@ -440,7 +596,10 @@ def parse_script(command: str, base: Path) -> list[tuple[Path | None, list[str]]
             if not argv:
                 continue
             # GIT_DIR / GIT_WORK_TREE choose a repository the cwd does not name.
-            commands.append((None if _env_assigns_git_location(raw) else cwd, argv))
+            inline = _leading_assignments(raw).get("GH_REPO", gh_repo)
+            commands.append((None if _env_assigns_git_location(raw) else cwd, argv, inline))
+        if len(pipeline) == 1:
+            gh_repo = _track_gh_repo(raw_pipeline[0], pipeline[0], gh_repo)
         if separator is None:
             break
         if len(pipeline) == 1 and pipeline[0][:1] == ["cd"]:
@@ -482,6 +641,17 @@ def parse_commit(argv: list[str], cwd: Path) -> Commit | object | None:
             return None
         index += 2 if token in _COMMIT_VALUES else 1
     return Commit(directory)
+
+
+def parse_replay(argv: list[str], cwd: Path) -> Replay | object | None:
+    """A git command that creates or replays commits other than ``commit``, or None."""
+    found = _git_subcommand(argv, cwd)
+    if found is None or found is _AMBIGUOUS:
+        return found
+    directory, subcommand, rest = found
+    if subcommand not in _REPLAYS:
+        return None
+    return Replay(directory, subcommand, tuple(rest))
 
 
 def _git_subcommand(argv: list[str], cwd: Path) -> tuple[Path, str, list[str]] | object | None:
@@ -532,6 +702,7 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
     if not argv or Path(argv[0]).name != "gh":
         return None
     repo = None
+    head = None
     saw_repo = False
     positionals: list[str] = []
     index = 1
@@ -557,6 +728,20 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
             saw_repo = True
             index += 1
             continue
+        if token in {"-H", "--head"}:
+            if index + 1 >= len(argv):
+                return _AMBIGUOUS
+            head = argv[index + 1]
+            index += 2
+            continue
+        if token.startswith("--head="):
+            head = token.split("=", 1)[1]
+            index += 1
+            continue
+        if token.startswith("-H") and len(token) > 2:
+            head = token[2:]
+            index += 1
+            continue
         if token.startswith("--") and "=" in token:
             index += 1
             continue
@@ -572,7 +757,7 @@ def parse_gh(argv: list[str]) -> GhCreate | object | None:
         index += 1
     if positionals[:2] != ["pr", "create"]:
         return None
-    return GhCreate(repo if saw_repo else None)
+    return GhCreate(repo if saw_repo else None, head)
 
 
 def _tokenize(command: str) -> list[str] | None:
@@ -619,20 +804,40 @@ def _read_command(tokens: list[str], index: int) -> tuple[list[str], str | None,
     return argv, None, index
 
 
-def _env_assigns_git_location(argv: list[str]) -> bool:
-    """True when the command sets ``GIT_DIR`` or ``GIT_WORK_TREE`` for itself."""
+def _leading_assignments(argv: list[str]) -> dict[str, str]:
+    """``NAME=value`` words in front of the command, before or after ``rtk``. Later ones win."""
     spans = [argv]
     for index, token in enumerate(argv):
         if token == "rtk":
             spans.append(argv[index + 1:])
             break
+    found: dict[str, str] = {}
     for span in spans:
         for token in span:
             if not _ENV.match(token):
                 break
-            if token.startswith(("GIT_DIR=", "GIT_WORK_TREE=")):
-                return True
-    return False
+            name, _, value = token.partition("=")
+            found[name] = value
+    return found
+
+
+def _env_assigns_git_location(argv: list[str]) -> bool:
+    """True when the command sets ``GIT_DIR`` or ``GIT_WORK_TREE`` for itself."""
+    return bool(_leading_assignments(argv).keys() & {"GIT_DIR", "GIT_WORK_TREE"})
+
+
+def _track_gh_repo(raw: list[str], argv: list[str], current: object) -> object:
+    """``GH_REPO`` after a lone command: a bare assignment or ``export`` sets it, ``unset`` clears it."""
+    if not argv:
+        return _leading_assignments(raw).get("GH_REPO", current)
+    if argv[0] == "export":
+        for token in argv[1:]:
+            if token.startswith("GH_REPO="):
+                current = token.partition("=")[2]
+        return current
+    if argv[0] == "unset" and "GH_REPO" in argv[1:]:
+        return None
+    return current
 
 
 _HEREDOC = re.compile(r"<<-?[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|([A-Za-z0-9_]+))")

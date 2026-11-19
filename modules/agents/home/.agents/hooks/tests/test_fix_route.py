@@ -48,7 +48,7 @@ class RepoFixture:
         self.env.start()
         self.addCleanup(self.env.stop)
         for key in list(os.environ):
-            if key in {"GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"}:
+            if key in {"GIT_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GH_REPO"}:
                 os.environ.pop(key, None)
             elif key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
                 os.environ.pop(key, None)
@@ -244,6 +244,45 @@ class RouteTests(RepoFixture, unittest.TestCase):
         other = self.repository(fork=False, name="their-pr")
         self.write_hosts_user("other-person")
         self.assertEqual(fix_route.decide(other, offline=True).route, "external")
+
+    def test_pr_comes_only_from_repository_local_config(self):
+        work = self.repository(fork=False, name="global-pr")
+        self.git("config", "--global", "agents.route", "pr")
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source), ("direct", "remotes"))
+        self.git("-C", str(work), "config", "--local", "agents.route", "pr")
+        self.assertEqual(fix_route.decide(work, offline=True).route, "pr")
+        self.git("-C", str(work), "config", "--local", "agents.route", "direct")
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source), ("direct", "config"))
+        self.git("-C", str(work), "config", "--local", "--unset", "agents.route")
+        self.git("config", "--global", "agents.route", "direct")
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source), ("direct", "config"))
+
+    def test_a_tag_named_like_the_branch_does_not_change_the_current_branch(self):
+        work = self.repository(fork=False, name="tagged")
+        self.git("-C", str(work), "tag", "main")
+        self.assertEqual(fix_route.local_branch(work), "main")
+        self.git("-C", str(work), "switch", "--detach")
+        self.assertIsNone(fix_route.local_branch(work))
+
+    def test_a_configured_route_that_needs_the_default_names_the_route_when_it_is_unknown(self):
+        work = self.repository(fork=False, name="unknown-default", branch="develop")
+        self.git("-C", str(work), "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+        with self.assertRaises(fix_route.DefaultBranchUnknown) as plain:
+            fix_route.decide(work, offline=True)
+        self.assertIsNone(plain.exception.route)
+        # direct never consults the default branch, so a missing one is no reason to fail closed.
+        for route, expected in (("pr", "pr"), ("upstream", "upstream"), ("upstream+carry", "upstream+carry"),
+                                ("direct", None)):
+            self.git("-C", str(work), "config", "agents.route", route)
+            with self.assertRaises(fix_route.DefaultBranchUnknown) as raised:
+                fix_route.decide(work, offline=True)
+            self.assertEqual(raised.exception.route, expected)
+        stderr, code = self.cli(work, "--offline")
+        self.assertEqual(code, 2)
+        self.assertIn("git remote set-head origin -a", stderr)
 
     def test_missing_repo_or_origin_exits_2(self):
         missing, code = self.cli(self.root / "absent", "--offline")

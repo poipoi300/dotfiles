@@ -3,7 +3,8 @@
 Routes, first match wins:
 
 - ``agents.route`` is ``direct``, ``pr``, ``upstream``, or ``upstream+carry``. ``pr`` is
-  only ever configured: the user's own repository that integrates through pull requests
+  only ever configured, and only by the repository's own config (``git config --local``): the
+  user's own repository that integrates through pull requests
 - a remote named ``upstream`` (local remote-tracking refs only; this never fetches)
 - otherwise who owns origin. Online, a GitHub fork with no ``upstream`` remote is
   an error before that. The login comes from ``git config --global
@@ -25,6 +26,8 @@ from pathlib import Path
 
 # Values ``agents.route`` accepts. Automatic routing never produces ``pr``.
 ROUTES = ("direct", "pr", "upstream", "upstream+carry")
+# Configured routes whose rules are stated in terms of origin's default branch.
+NEEDS_DEFAULT = ("pr", "upstream", "upstream+carry")
 TIMEOUT = 5
 
 _SLUG = re.compile(
@@ -42,6 +45,18 @@ class RouteError(Exception):
     def __init__(self, message: str, code: int = 2) -> None:
         super().__init__(message)
         self.code = code
+
+
+class DefaultBranchUnknown(RouteError):
+    """Origin's default branch cannot be read from the local refs.
+
+    ``route`` is the configured route that cannot be applied without it, or None.
+    """
+
+    def __init__(self, route: str | None = None) -> None:
+        super().__init__("fix-route: default branch unknown; git fetch origin, "
+                         "then git remote set-head origin -a")
+        self.route = route
 
 
 @dataclass(frozen=True)
@@ -255,13 +270,17 @@ def remote_default(directory: Path, remote: str) -> str | None:
 
 
 def local_branch(directory: Path) -> str | None:
+    """The checked-out branch's name, None when HEAD is detached.
+
+    ``--short`` abbreviates ambiguously: with a tag named ``main`` it prints ``heads/main``.
+    """
     try:
-        head = git(directory, "symbolic-ref", "--short", "HEAD")
+        head = git(directory, "symbolic-ref", "HEAD")
     except (OSError, subprocess.TimeoutExpired):
         return None
     if head.returncode != 0:
         return None
-    return head.stdout.strip() or None
+    return head.stdout.strip().removeprefix("refs/heads/") or None
 
 
 def push_remote(directory: Path) -> str | None:
@@ -382,16 +401,25 @@ def _by_owner(directory: Path, origin_repo: str | None, source: str) -> Route:
     )
 
 
-def _configured_route(directory: Path) -> str | None:
+def _read_route_config(directory: Path, *scope: str) -> str | None:
     try:
-        result = git(directory, "config", "--get", "agents.route")
+        result = git(directory, "config", *scope, "--get", "agents.route")
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RouteError("fix-route: cannot read git config agents.route") from error
     if result.returncode == 1 or (result.returncode == 0 and not result.stdout.strip()):
         return None
     if result.returncode != 0:
         raise RouteError("fix-route: cannot read git config agents.route")
-    value = result.stdout.strip()
+    return result.stdout.strip()
+
+
+def _configured_route(directory: Path) -> str | None:
+    """The configured route. ``pr`` opts a repository in, so only its own config may say it."""
+    value = _read_route_config(directory)
+    if value == "pr":
+        value = _read_route_config(directory, "--local")
+    if value is None:
+        return None
     if value not in ROUTES:
         raise RouteError(
             "fix-route: agents.route must be direct, pr, upstream, or upstream+carry "
@@ -423,16 +451,16 @@ def _ahead(directory: Path) -> bool:
         raise RouteError("fix-route: cannot compare origin and upstream; run git fetch --all, then rerun") from error
 
 
-def _origin_default(directory: Path) -> str:
+def _origin_default(directory: Path, configured: str | None = None) -> str:
     branch = remote_default(directory, "origin")
     if not branch:
-        raise RouteError("fix-route: default branch unknown; git fetch origin")
+        raise DefaultBranchUnknown(configured if configured in NEEDS_DEFAULT else None)
     return branch
 
 
 def _finish(directory: Path, route: str, source: str, origin_repo: str | None,
             upstream: str | None) -> Route:
-    origin_default = _origin_default(directory)
+    origin_default = _origin_default(directory, route if source == "config" else None)
     if route in ("direct", "pr"):
         return Route(route, source, origin_default, None, origin_repo,
                      route_steps(route, origin_default, None, None))
