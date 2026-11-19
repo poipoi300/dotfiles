@@ -39,6 +39,7 @@ class Push:
     delete: bool
     tags: bool
     all_branches: bool
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,13 +98,24 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
     route = _cached_route(directory, cache)
     if route is _NOT_A_REPO:
         return None
+    # Login unknown: nothing here is a clear violation. A crashed decide() is not this route,
+    # so the never-push-upstream rule below still applies to that case.
+    if isinstance(route, fix_route.Route) and route.route == "unknown":
+        return None
     if isinstance(push, Push):
-        if _pushes_upstream(push, directory):
+        if push.dry_run:
+            return None
+        if _pushes_upstream(push, directory) and not _explicit_direct(directory, cache):
             return _deny(_UPSTREAM)
         if isinstance(route, fix_route.Route) and route.route == "upstream" and _pushes_origin_default(push, directory):
             return _deny(_CARRY)
+        if isinstance(route, fix_route.Route) and route.route == "external" and _pushes_origin_default(push, directory):
+            repo = route.origin_repo or "this repo"
+            return _deny(f"fix-route: {repo} isn't the user's; push a branch and open a PR.")
         return None
     if not isinstance(created, GhCreate) or not isinstance(route, fix_route.Route):
+        return None
+    if route.route == "external":
         return None
     if route.route == "direct":
         repo = route.origin_repo or "this repo"
@@ -114,6 +126,20 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
         return _deny("fix-route: this is a fork; open the PR against upstream: "
                      f"gh pr create --repo {route.upstream_repo} ...")
     return None
+
+
+def _explicit_direct(directory: Path, cache: dict[str, object]) -> bool:
+    """True only for ``git config agents.route direct``. Errors are not an override."""
+    key = "direct-override\0" + os.path.normpath(os.fspath(directory))
+    if key in cache:
+        return bool(cache[key])
+    try:
+        result = fix_route.git(directory, "config", "--get", "agents.route")
+        found = result.returncode == 0 and result.stdout.strip() == "direct"
+    except Exception:
+        found = False
+    cache[key] = found
+    return found
 
 
 def _cached_route(directory: Path, cache: dict[str, object]) -> object:
@@ -149,8 +175,9 @@ def _pushes_origin_default(push: Push, directory: Path) -> bool:
     remote = push.remote if push.remote is not None else fix_route.push_remote(directory)
     if not remote or not _same_remote(remote, "origin", directory):
         return False
-    default = fix_route.remote_default(directory, "origin") or fix_route.local_branch(directory)
+    default = fix_route.remote_default(directory, "origin")
     if not default:
+        # No origin HEAD, main, or master ref. The current branch is not a substitute.
         return False
     if push.all_branches:
         return True
@@ -212,30 +239,39 @@ def parse_script(command: str, base: Path) -> list[tuple[Path | None, list[str]]
     """Simple commands and the directory each one runs in. None when the shell is not parseable.
 
     ``|`` runs each side in the directory from before the pipeline. ``cd`` persists across
-    ``&&``, ``||``, ``;``, and newlines.
+    ``&&``, ``||``, ``;``, and newlines. A heredoc body is not a command. ``pushd`` and
+    ``popd`` make the directory unknown from there on.
     """
-    tokens = _tokenize(command)
+    stripped = _strip_heredocs(command)
+    if stripped is None:
+        return None
+    tokens = _tokenize(stripped)
     if tokens is None or any(token in {"(", ")", "`"} for token in tokens):
         return None
     commands: list[tuple[Path | None, list[str]]] = []
     cwd: Path | None = base
     index = 0
     while index <= len(tokens):
-        pipeline: list[list[str]] = []
+        raw_pipeline: list[list[str]] = []
         separator = None
         while True:
             argv, separator, index = _read_command(tokens, index)
             if argv:
-                pipeline.append(_normalize(argv))
+                raw_pipeline.append(argv)
             if separator != "|":
                 break
-        for argv in pipeline:
-            if argv:
-                commands.append((cwd, argv))
+        pipeline = [_normalize(argv) for argv in raw_pipeline]
+        for raw, argv in zip(raw_pipeline, pipeline, strict=True):
+            if not argv:
+                continue
+            # GIT_DIR / GIT_WORK_TREE choose a repository the cwd does not name.
+            commands.append((None if _env_assigns_git_location(raw) else cwd, argv))
         if separator is None:
             break
-        if cwd is not None and len(pipeline) == 1 and pipeline[0][:1] == ["cd"]:
-            cwd = _apply_cd(cwd, pipeline[0])
+        if len(pipeline) == 1 and pipeline[0][:1] == ["cd"]:
+            cwd = None if cwd is None else _apply_cd(cwd, pipeline[0])
+        elif len(pipeline) == 1 and pipeline[0][:1] in (["pushd"], ["popd"]):
+            cwd = None
     return commands
 
 
@@ -284,8 +320,8 @@ def parse_push(argv: list[str], cwd: Path) -> Push | object | None:
     parsed = _push_args(argv[index + 1:])
     if parsed is _AMBIGUOUS:
         return _AMBIGUOUS
-    remote, refspecs, delete, tags, all_branches = parsed
-    return Push(directory, remote, refspecs, delete, tags, all_branches)
+    remote, refspecs, delete, tags, all_branches, dry_run = parsed
+    return Push(directory, remote, refspecs, delete, tags, all_branches, dry_run)
 
 
 def parse_gh(argv: list[str]) -> GhCreate | object | None:
@@ -380,6 +416,97 @@ def _read_command(tokens: list[str], index: int) -> tuple[list[str], str | None,
     return argv, None, index
 
 
+def _env_assigns_git_location(argv: list[str]) -> bool:
+    """True when the command sets ``GIT_DIR`` or ``GIT_WORK_TREE`` for itself."""
+    spans = [argv]
+    for index, token in enumerate(argv):
+        if token == "rtk":
+            spans.append(argv[index + 1:])
+            break
+    for span in spans:
+        for token in span:
+            if not _ENV.match(token):
+                break
+            if token.startswith(("GIT_DIR=", "GIT_WORK_TREE=")):
+                return True
+    return False
+
+
+_HEREDOC = re.compile(r"<<-?[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|([A-Za-z0-9_]+))")
+
+
+def _strip_heredocs(command: str) -> str | None:
+    """Remove heredoc bodies. None when a delimiter never closes, which the guard allows."""
+    lines = command.split("\n")
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        operators = _heredoc_operators(lines[index])
+        if operators is None:
+            return None
+        kept.append(lines[index])
+        index += 1
+        for word, strip_tabs in operators:
+            closed = False
+            while index < len(lines):
+                body = lines[index]
+                index += 1
+                candidate = body.lstrip("\t") if strip_tabs else body
+                if candidate == word:
+                    closed = True
+                    break
+            if not closed:
+                return None
+    return "\n".join(kept)
+
+
+def _heredoc_operators(line: str) -> list[tuple[str, bool]] | None:
+    """Heredoc words on ``line``, outside quotes. None when a ``<<`` is not one we can delimit."""
+    operators: list[tuple[str, bool]] = []
+    index = 0
+    in_single = False
+    in_double = False
+    while index < len(line):
+        character = line[index]
+        if in_single:
+            if character == "'":
+                in_single = False
+            index += 1
+            continue
+        if in_double:
+            if character == "\\" and index + 1 < len(line):
+                index += 2
+                continue
+            if character == '"':
+                in_double = False
+            index += 1
+            continue
+        if character == "'":
+            in_single = True
+            index += 1
+            continue
+        if character == '"':
+            in_double = True
+            index += 1
+            continue
+        if character == "\\" and index + 1 < len(line):
+            index += 2
+            continue
+        if character == "<" and index + 1 < len(line) and line[index + 1] == "<":
+            if index + 2 < len(line) and line[index + 2] == "<":
+                index += 3
+                continue
+            match = _HEREDOC.match(line, index)
+            if match is None:
+                return None
+            word = match.group(1) or match.group(2) or match.group(3)
+            operators.append((word, line.startswith("<<-", index)))
+            index = match.end()
+            continue
+        index += 1
+    return operators
+
+
 def _normalize(argv: list[str]) -> list[str]:
     index = 0
     while index < len(argv) and _ENV.match(argv[index]):
@@ -405,7 +532,7 @@ def _apply_cd(cwd: Path, argv: list[str]) -> Path | None:
 def _push_args(argv: list[str]) -> tuple | object:
     remote_flag = None
     positionals: list[str] = []
-    delete = tags = all_branches = False
+    delete = tags = all_branches = dry_run = False
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -424,6 +551,14 @@ def _push_args(argv: list[str]) -> tuple | object:
             all_branches = True
             index += 1
             continue
+        if token == "--dry-run":
+            dry_run = True
+            index += 1
+            continue
+        if token == "--no-dry-run":
+            dry_run = False
+            index += 1
+            continue
         if token in _PUSH_VALUES:
             if index + 1 >= len(argv):
                 return _AMBIGUOUS
@@ -436,6 +571,12 @@ def _push_args(argv: list[str]) -> tuple | object:
             index += 1
             continue
         if token.startswith("--") and "=" in token:
+            index += 1
+            continue
+        if token.startswith("-") and not token.startswith("--"):
+            # git push -n is --dry-run, including inside a short cluster such as -nu.
+            if "n" in token[1:]:
+                dry_run = True
             index += 1
             continue
         if token.startswith("-"):
@@ -452,7 +593,7 @@ def _push_args(argv: list[str]) -> tuple | object:
     else:
         remote = None
         refspecs = []
-    return remote, _fold_tags(refspecs), delete, tags, all_branches
+    return remote, _fold_tags(refspecs), delete, tags, all_branches, dry_run
 
 
 def _fold_tags(refspecs: list[str]) -> tuple[str, ...]:

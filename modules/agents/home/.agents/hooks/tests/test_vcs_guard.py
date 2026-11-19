@@ -132,6 +132,104 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
             self.assertEqual(native.dispatch("claude", allowed), {})
             rewrite.assert_not_called()
 
+    def test_external_allows_a_pr_and_denies_the_default_branch(self):
+        work = self.repository(fork=False, name="theirs")
+        self.write_hosts_user("other-person")
+        reason = self.assert_deny(
+            "git push origin main", work,
+            "fix-route: solo-owner/widget isn't the user's; push a branch and open a PR.",
+        )
+        self.assertEqual(reason, "fix-route: solo-owner/widget isn't the user's; push a branch and open a PR.")
+        self.assert_deny("git push", work, "isn't the user's")
+        self.assert_allow("gh pr create", work)
+        self.assert_allow("gh pr create --repo solo-owner/widget", work)
+        self.assert_allow("git push -u origin feature", work)
+        self.git("-C", str(work), "switch", "-c", "feature")
+        self.assert_allow("git push", work)
+        self.assert_allow("git push origin feature", work)
+
+    def test_unknown_login_allows_every_command(self):
+        work = self.repository(fork=False, name="no-login")
+        self.write_hosts_user(None)
+        self.assert_allow("gh pr create", work)
+        self.assert_allow("git push origin main", work)
+        self.assert_allow("git push", work)
+        self.assert_allow("git push upstream", work)
+
+    def test_heredoc_bodies_are_not_commands(self):
+        fork = self.repository(ahead=False, name="heredoc")
+        self.assert_allow("git commit -F - <<EOF\ngit push origin main\nEOF", fork)
+        self.assert_allow("cat > f <<'EOF'\ngit push upstream main\nEOF", fork)
+        self.assert_allow("cat > f <<-'EOF'\n\tgit push upstream main\n\tEOF", fork)
+        self.assert_allow("git commit -F - <<EOF\ngit push origin main", fork)
+        self.assert_deny("git commit -F - <<EOF\nnote\nEOF\ngit push origin main", fork, CARRY)
+        self.assert_deny('echo "<<" && git push origin main', fork, CARRY)
+
+    def test_unknown_origin_default_allows_a_feature_push(self):
+        fork = self.repository(ahead=False, name="no-default")
+        self.git("-C", str(fork), "switch", "-c", "feature")
+        upstream = fix_route.Route(
+            "upstream", "config", "main", "upstream-owner/widget", "origin-owner/widget", (),
+        )
+        with patch.object(fix_route, "decide", return_value=upstream), \
+                patch.object(fix_route, "remote_default", return_value=None):
+            self.assert_allow("git push", fork)
+            self.assert_allow("git push origin feature", fork)
+            self.assert_allow("git push origin HEAD", fork)
+
+    def test_dry_run_push_is_allowed(self):
+        fork = self.repository(ahead=False, name="dry")
+        for command in ("git push --dry-run origin main", "git push -n origin main",
+                        "git push origin main --dry-run", "git push -nu origin main",
+                        "git push --dry-run upstream"):
+            self.assert_allow(command, fork)
+        self.assert_deny("git push origin main", fork, CARRY)
+
+    def test_git_dir_and_pushd_make_the_directory_unknown(self):
+        fork = self.repository(ahead=False, name="located")
+        parent = fork.parent
+        for command in ("GIT_DIR=/x git push origin main",
+                        "GIT_WORK_TREE= git push upstream",
+                        "GIT_WORK_TREE=/x git push origin main",
+                        "FOO=bar GIT_DIR=/x git push origin main",
+                        "pushd /x && git push origin main",
+                        "pushd /x && git push upstream",
+                        "popd && git push origin main",
+                        "GIT_DIR=/x rtk git push origin main",
+                        "rtk GIT_DIR=/tmp git push upstream"):
+            self.assert_allow(command, fork)
+        self.assert_deny("cd located && git push origin main", parent, CARRY)
+        self.assert_deny("FOO=bar git push origin main", fork, CARRY)
+
+    def test_host_owner_repo_counts_as_upstream(self):
+        fork = self.repository(ahead=False, name="host-form")
+        self.assert_allow("gh pr create --repo github.com/upstream-owner/widget", fork)
+        self.assert_allow("gh pr create --repo https://github.com/upstream-owner/widget", fork)
+        self.assert_deny("gh pr create --repo github.com/origin-owner/widget", fork,
+                         "gh pr create --repo upstream-owner/widget")
+
+    def test_explicit_direct_config_allows_an_upstream_push(self):
+        fork = self.repository(ahead=False, name="forced-direct")
+        self.assert_deny("git push upstream main", fork, UPSTREAM_PUSH)
+        self.git("-C", str(fork), "config", "agents.route", "direct")
+        self.assert_allow("git push upstream", fork)
+        self.assert_allow("git push upstream main", fork)
+        self.assert_deny("gh pr create", fork, "no PR.")
+        with patch.object(fix_route, "decide", side_effect=RuntimeError("boom")):
+            self.assert_allow("git push upstream", fork)
+
+    def test_bare_push_respects_remote_push_default(self):
+        fork = self.repository(ahead=False, name="push-default")
+        self.git("-C", str(fork), "switch", "-c", "feature")
+        self.git("-C", str(fork), "config", "remote.pushDefault", "upstream")
+        self.assert_deny("git push", fork, UPSTREAM_PUSH)
+        self.git("-C", str(fork), "config", "branch.feature.pushRemote", "origin")
+        self.assert_allow("git push", fork)
+        self.git("-C", str(fork), "switch", "main")
+        self.git("-C", str(fork), "remote", "add", "other", "https://github.com/other/widget.git")
+        self.git("-C", str(fork), "config", "remote.pushDefault", "other")
+        self.assert_allow("git push", fork)
+
     def test_unrelated_commands_do_not_spawn_git(self):
         with patch.object(fix_route, "run") as run:
             self.assert_allow("ls -la", self.root)
