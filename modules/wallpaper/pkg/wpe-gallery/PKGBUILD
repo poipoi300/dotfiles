@@ -1,7 +1,7 @@
 # Maintainer: wpe-gallery contributors
 pkgname=wpe-gallery
 pkgver=0.2.5
-pkgrel=3
+pkgrel=4
 pkgdesc='Native GPUI gallery for installed Wallpaper Engine wallpapers'
 arch=('x86_64' 'aarch64')
 url='https://github.com/poipoi300/wpe-gallery'
@@ -13,7 +13,7 @@ depends=('linux-wallpaperengine' 'wayland' 'libxkbcommon' 'libx11' 'libxcb'
          'vulkan-icd-loader' 'gcc-libs' 'glibc')
 makedepends=('git' 'rust' 'clang' 'cmake' 'pkgconf' 'python')
 optdepends=('niri: fallback output detection' 'noto-fonts-cjk: CJK wallpaper titles')
-_commit=8652fac650bac327e25a5d70bcb379b7225b2041
+_commit=6b0e3d37a22e6118e177b677575142bf7f4d1c77
 source=("$pkgname::git+https://github.com/poipoi300/wpe-gallery.git#commit=$_commit")
 sha256sums=('SKIP')
 
