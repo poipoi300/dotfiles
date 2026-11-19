@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "hooks"))
 sys.path.insert(0, str(ROOT / "usage"))
 
 import behavior
+import model_guard
 import vcs_guard
 
 try:
@@ -27,6 +28,9 @@ except ImportError:
 def dispatch(provider: str, payload: dict) -> dict:
     event = payload.get("hook_event_name")
     if event == "PreToolUse":
+        denied = model_guard.guard(payload)
+        if denied:
+            return denied
         # The route guard runs for both providers. A deny wins; Codex still rewrites what it allows.
         try:
             denied = vcs_guard.guard(payload)

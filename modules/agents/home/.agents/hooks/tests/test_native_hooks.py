@@ -18,6 +18,7 @@ ROOT = Path(os.path.abspath(__file__)).parents[2]
 sys.path.insert(0, str(ROOT / "hooks"))
 import behavior
 import journal
+import model_guard
 import native
 import register
 
@@ -29,6 +30,25 @@ needs_engine = unittest.skipUnless(behavior.impeccable_engine(ROOT / "skills" / 
 def usage(**kwargs):
     """Stand-in for the private usage/budget.py module the SessionStart hook optionally uses."""
     return patch.object(native, "budget", types.SimpleNamespace(**kwargs))
+
+
+class ModelGuardTests(unittest.TestCase):
+    def decide(self, tool, tool_input):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
+        return native.dispatch("claude", payload).get("hookSpecificOutput", {})
+
+    def test_fable_subagents_and_delegates_are_denied_with_the_reason(self):
+        for tool, tool_input in (("Agent", {"prompt": "x", "model": "fable"}),
+                                 ("spawn_agent", {"model": "claude-fable-5-2"}),
+                                 ("mcp__t3-code__delegate_task", {"target": {"provider": "claude",
+                                                                            "model": "claude-fable-5-2"}})):
+            output = self.decide(tool, tool_input)
+            self.assertEqual(output["permissionDecision"], "deny")
+            self.assertEqual(output["permissionDecisionReason"], model_guard.REASON)
+
+    def test_other_models_and_prompts_mentioning_fable_are_allowed(self):
+        self.assertEqual(self.decide("Agent", {"prompt": "compare fable and opus", "model": "opus"}), {})
+        self.assertEqual(self.decide("mcp__t3-code__delegate_task", {"target": {"model": "gpt-5"}}), {})
 
 
 class NativeHookTests(unittest.TestCase):
@@ -191,7 +211,7 @@ class NativeHookTests(unittest.TestCase):
         payload = self.payload("PreToolUse", tool_name="Bash", tool_input={"command": "git status"})
         home = self.directory / "home"
         (home / ".agents/hooks").mkdir(parents=True)
-        for name in ("native.py", "behavior.py", "vcs_guard.py", "fix_route.py"):
+        for name in ("native.py", "behavior.py", "model_guard.py", "vcs_guard.py", "fix_route.py"):
             shutil.copy2(ROOT / "hooks" / name, home / ".agents/hooks" / name)
         result = subprocess.run(["sh", "-c", command], check=False, input=json.dumps(payload), capture_output=True,
                                 text=True, timeout=8, env={**os.environ, "HOME": str(home)})
@@ -234,6 +254,8 @@ class RegistrationTests(unittest.TestCase):
             pre_tool = register.handlers(Path.home(), provider)["PreToolUse"][0]
             self.assertEqual(pre_tool["matcher"], "^Bash$")
             self.assertEqual(pre_tool["hooks"][0]["timeout"], 5)
+            self.assertEqual(register.handlers(Path.home(), provider)["PreToolUse"][1]["matcher"],
+                             model_guard.MATCHER)
 
     def test_hand_merged_home_relative_registration_is_recognised_as_owned(self):
         home = self.home

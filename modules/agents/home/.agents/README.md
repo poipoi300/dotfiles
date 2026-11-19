@@ -155,7 +155,8 @@ user's own repository, an upstream pull request, that pull request plus a carry 
 default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
 prints it, for debugging). The user's own repository can opt into pull requests with
 `git config agents.route pr`; only that repository's own config selects `pr`, never the global
-config. Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
+config. `hooks/model_guard.py` denies any subagent or delegate launch (Claude `Agent`, Codex
+`spawn_agent`, T3 `delegate_task`) whose model names Fable. Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
 branch of a fork, someone else's repository, or a `pr` repository, and a push or pull request that
 misses the route. In a `pr` repository it also denies a merge, cherry-pick, rebase, `am`, revert
 or pull on the default branch (mid-operation too) unless it only fast-forwards from origin's

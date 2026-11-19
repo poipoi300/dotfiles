@@ -84,10 +84,6 @@ routing for native T3 delegation.
 Set every subagent's model explicitly, picked per task from the model table in
 context; unset, it inherits the parent's.
 
-Never launch a Fable subagent or delegate (any Fable model) unless the user
-directly asks for Fable in the current request. Pick another model otherwise,
-even when Fable would fit the task best.
-
 Use the usage snapshot to choose the model mix: when one provider is nearly
 spent, shift delegates to the providers with headroom. The SessionStart hook
 supplies a snapshot; refresh it with

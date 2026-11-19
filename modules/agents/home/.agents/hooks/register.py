@@ -13,6 +13,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import model_guard
+
 
 def read_json(path: Path) -> dict:
     try:
@@ -61,6 +64,8 @@ def handlers(home: Path, provider: str) -> dict:
         result.setdefault(event, []).append(group)
     # Both providers: the route guard inspects Bash before Codex's RTK rewrite.
     result["PreToolUse"] = [{"matcher": "^Bash$", "hooks": [
+        {"type": "command", "command": command, "timeout": 5},
+    ]}, {"matcher": model_guard.MATCHER, "hooks": [
         {"type": "command", "command": command, "timeout": 5},
     ]}]
     return result
