@@ -1,17 +1,19 @@
 # Maintainer: wpe-gallery contributors
 pkgname=wpe-gallery
 pkgver=0.2.5
-pkgrel=1
+pkgrel=2
 pkgdesc='Native GPUI gallery for installed Wallpaper Engine wallpapers'
 arch=('x86_64' 'aarch64')
 url='https://github.com/poipoi300/wpe-gallery'
 license=('MIT')
+# GCC LTO objects from Tree-sitter do not link with Rust’s linker.
+options=('!lto')
 depends=('linux-wallpaperengine' 'wayland' 'libxkbcommon' 'libx11' 'libxcb'
          'libxrandr' 'libxi' 'libxcursor' 'fontconfig' 'freetype2'
          'vulkan-icd-loader' 'gcc-libs' 'glibc')
 makedepends=('git' 'rust' 'clang' 'cmake' 'pkgconf' 'python')
 optdepends=('niri: fallback output detection' 'noto-fonts-cjk: CJK wallpaper titles')
-_commit=bc03a85309dcfc57cb3b08d0ae582b32b4865fec
+_commit=408e918ca185c405383bb0b625045fef3bd59cc7
 source=("$pkgname::git+https://github.com/poipoi300/wpe-gallery.git#commit=$_commit")
 sha256sums=('SKIP')
 
