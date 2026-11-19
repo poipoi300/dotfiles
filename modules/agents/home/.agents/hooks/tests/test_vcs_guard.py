@@ -114,8 +114,8 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.assert_allow("git push upstream", self.root)
         self.assert_allow("gh pr create", self.root)
         self.git("-C", str(fork), "config", "agents.route", "sideways")
-        # A bad agents.route is not a route, but the remote name is still upstream.
-        self.assert_deny("git push upstream", fork, UPSTREAM_PUSH)
+        # A bad agents.route is denied with the router's error, even for an upstream push.
+        self.assert_deny("git push upstream", fork, "agents.route must be direct, pr, upstream, or upstream+carry")
         self.assert_deny("gh pr create", fork, "agents.route must be direct, pr, upstream, or upstream+carry")
         with patch.object(fix_route, "decide", side_effect=RuntimeError("boom")):
             self.assert_deny("git push upstream", fork, UPSTREAM_PUSH)
@@ -343,6 +343,55 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.assert_deny("git merge --ff-only @{u}", work, "so nothing is merged")
         self.git("-C", str(work), "branch", "origin/main")
         self.assert_deny("git merge --ff-only origin/main", work, "so nothing is merged")
+
+    def test_a_bare_pull_is_a_sync_only_when_the_branch_tracks_origins_default(self):
+        work = self.pr_repository("pr-bare-pull")
+        self.git("-C", str(work), "branch", "feature")
+        self.git("-C", str(work), "update-ref", "refs/remotes/origin/feature", "feature")
+        bare = ("git pull --ff-only", "git pull -q --ff-only --no-rebase", "git -C . pull --ff-only")
+        for command in bare:
+            self.assert_allow(command, work)
+        # A bare pull follows the branch's own tracking configuration, not origin's default branch.
+        self.git("-C", str(work), "branch", "--set-upstream-to=origin/feature")
+        for command in bare:
+            reason = self.assert_deny(command, work, "so nothing is merged, cherry-picked, rebased")
+            self.assertIn("git switch -c <branch>", reason)
+        self.git("-C", str(work), "branch", "--set-upstream-to=origin/main")
+        self.git("-C", str(work), "config", "branch.main.remote", ".")
+        self.git("-C", str(work), "config", "branch.main.merge", "refs/heads/feature")
+        self.assert_deny("git pull --ff-only", work, "so nothing is merged")
+        self.git("-C", str(work), "config", "branch.main.remote", "origin")
+        self.git("-C", str(work), "config", "branch.main.merge", "refs/heads/main")
+        self.git("-C", str(work), "config", "--add", "branch.main.merge", "refs/heads/feature")
+        self.assert_deny("git pull --ff-only", work, "so nothing is merged")
+        self.git("-C", str(work), "config", "--unset-all", "branch.main.merge")
+        self.assert_deny("git pull --ff-only", work, "so nothing is merged")
+        self.git("-C", str(work), "config", "branch.main.merge", "refs/heads/main")
+        self.assert_allow("git pull --ff-only", work)
+        self.git("-C", str(work), "config", "--unset", "branch.main.remote")
+        self.assert_deny("git pull --ff-only", work, "so nothing is merged")
+
+    def test_a_present_but_empty_route_fails_closed(self):
+        work = self.repository(fork=False, name="empty-route")
+        self.git("-C", str(work), "config", "agents.route", "")
+        for command in ("git commit -m x", "git push origin main", "git merge feature", "gh pr create"):
+            reason = self.assert_deny(command, work, "vcs: the configured route can't be applied")
+            self.assertIn("agents.route must be direct, pr, upstream, or upstream+carry (got '')", reason)
+        self.git("-C", str(work), "config", "--unset", "agents.route")
+        self.assert_allow("git commit -m x", work)
+
+    def test_every_mutation_under_a_failed_configured_route_shows_the_routers_error(self):
+        fork = self.repository(ahead=False, name="bad-route-upstream-push")
+        self.git("-C", str(fork), "config", "agents.route", "prr")
+        for command in ("git push upstream", "git push upstream main",
+                        "git push https://github.com/upstream-owner/widget.git"):
+            reason = self.assert_deny(command, fork, "vcs: the configured route can't be applied")
+            self.assertIn("agents.route must be direct, pr, upstream, or upstream+carry (got 'prr')", reason)
+            self.assertNotIn("gh pr create", reason)
+        self.assert_allow("git push --dry-run upstream", fork)
+        # Without a failing route an upstream push keeps its own instruction.
+        self.git("-C", str(fork), "config", "--unset", "agents.route")
+        self.assert_deny("git push upstream", fork, UPSTREAM_PUSH)
 
     def test_a_configured_route_that_cannot_be_applied_fails_closed(self):
         work = self.repository(fork=False, name="bad-route")

@@ -420,10 +420,11 @@ def _read_route_config(directory: Path, *scope: str) -> str | None:
         result = git(directory, "config", *scope, "--get", "agents.route")
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RouteError("fix-route: cannot read git config agents.route") from error
-    if result.returncode == 1 or (result.returncode == 0 and not result.stdout.strip()):
+    if result.returncode == 1:
         return None
     if result.returncode != 0:
         raise RouteError("fix-route: cannot read git config agents.route")
+    # A present but empty value is a configured route that names nothing, not an absent one.
     return result.stdout.strip()
 
 

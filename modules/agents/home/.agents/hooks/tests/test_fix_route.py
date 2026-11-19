@@ -324,6 +324,15 @@ class RouteTests(RepoFixture, unittest.TestCase):
         with self.assertRaises(fix_route.ConfiguredRouteError):
             fix_route.decide(fork, offline=True)
 
+    def test_a_present_but_empty_route_is_a_configured_route_error(self):
+        work = self.repository(fork=False, name="empty-config")
+        self.git("-C", str(work), "config", "agents.route", "")
+        with self.assertRaises(fix_route.ConfiguredRouteError) as empty:
+            fix_route.decide(work, offline=True)
+        self.assertIn("(got '')", str(empty.exception))
+        self.git("-C", str(work), "config", "--unset", "agents.route")
+        self.assertNotEqual(fix_route.decide(work, offline=True).source, "config")
+
     def test_missing_repo_or_origin_exits_2(self):
         missing, code = self.cli(self.root / "absent", "--offline")
         self.assertEqual(code, 2)

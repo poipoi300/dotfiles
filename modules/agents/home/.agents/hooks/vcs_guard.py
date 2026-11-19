@@ -279,9 +279,6 @@ def _configured_failure(error: fix_route.ConfiguredRouteError, directory: Path, 
     if isinstance(push, Push):
         if push.dry_run:
             return None
-        # Pushing upstream is wrong without any route, so its own instruction still applies.
-        if _pushes_upstream(push, directory, moved) and not _explicit_direct(directory, cache):
-            return _deny(_upstream_push_reason(None))
     if isinstance(replay, Replay) and _inert(replay):
         return None
     problem = str(error).removeprefix("fix-route: ")
@@ -450,13 +447,31 @@ def _syncs_from_origin_default(replay: Replay, default: str | None) -> bool:
     """``git pull`` with no operands or ``origin <default>``; ``git merge`` of origin's default branch."""
     operands = _operands(replay.args)
     if replay.subcommand == "pull":
-        return not operands or (default is not None and operands == ["origin", default])
+        if operands:
+            return default is not None and operands == ["origin", default]
+        return default is not None and _tracks_origin_default(replay.directory, default)
     if default is None or len(operands) != 1:
         return False
     # Resolving the operand as git does catches a local branch named ``origin/<default>``,
     # which wins over the remote-tracking ref, and ``@{u}``, which is only origin's when it is.
     found = fix_route.git(replay.directory, "rev-parse", "--symbolic-full-name", operands[0])
     return found.returncode == 0 and found.stdout.strip() == f"refs/remotes/origin/{default}"
+
+
+def _tracks_origin_default(directory: Path, default: str) -> bool:
+    """True when a bare ``git pull`` fetches only origin's ``default`` branch into the current branch.
+
+    A bare pull follows ``branch.<current>.remote`` and ``.merge``, so a local default branch that
+    tracks another ref would advance to it.
+    """
+    branch = fix_route.local_branch(directory)
+    if branch is None:
+        return False
+    remote = fix_route.git(directory, "config", "--get-all", f"branch.{branch}.remote")
+    merge = fix_route.git(directory, "config", "--get-all", f"branch.{branch}.merge")
+    if remote.returncode != 0 or merge.returncode != 0:
+        return False
+    return remote.stdout.split() == ["origin"] and merge.stdout.split() == [f"refs/heads/{default}"]
 
 
 def _replays_onto_default(replay: Replay, default: str) -> bool:
