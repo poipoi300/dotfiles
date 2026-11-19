@@ -214,8 +214,36 @@ class RouteTests(RepoFixture, unittest.TestCase):
         self.git("-C", str(work), "config", "agents.route", "sideways")
         stderr, code = self.cli(work, "--offline")
         self.assertEqual(code, 2)
-        self.assertIn("agents.route must be direct, upstream, or upstream+carry", stderr)
+        self.assertIn("agents.route must be direct, pr, upstream, or upstream+carry", stderr)
         self.assertIn("sideways", stderr)
+
+    def test_pr_is_only_reached_through_config_and_describes_the_pr_workflow(self):
+        work = self.repository(fork=False, name="own-pr")
+        self.assertEqual(fix_route.decide(work, offline=True).route, "direct")
+        self.git("-C", str(work), "config", "agents.route", "pr")
+        route = fix_route.decide(work, offline=True)
+        self.assertEqual((route.route, route.source, route.default_branch), ("pr", "config", "main"))
+        self.assertEqual(route.origin_repo, "solo-owner/widget")
+        self.assertIsNone(route.upstream_repo)
+        self.assertEqual(route.steps, (
+            "git switch -c <branch>",
+            "Commit on that branch.",
+            "git push -u origin HEAD",
+            "gh pr create",
+            "The PR merges on GitHub.",
+            "Do not commit on or push main.",
+        ))
+        text = route.format_text()
+        self.assertTrue(text.startswith("pr (set by git config agents.route)\n"), text)
+        stdout, code = self.cli(work, "--offline", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout), route.as_dict())
+        self.git("-C", str(work), "config", "--unset", "agents.route")
+        unset = fix_route.decide(work, offline=True)
+        self.assertEqual((unset.route, unset.source), ("direct", "remotes"))
+        other = self.repository(fork=False, name="their-pr")
+        self.write_hosts_user("other-person")
+        self.assertEqual(fix_route.decide(other, offline=True).route, "external")
 
     def test_missing_repo_or_origin_exits_2(self):
         missing, code = self.cli(self.root / "absent", "--offline")

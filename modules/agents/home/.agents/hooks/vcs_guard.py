@@ -4,6 +4,10 @@ PreToolUse denies a commit, push, or ``gh pr create`` that misses the route; eac
 the whole instruction for an agent that has never heard of routes. PostToolUse reminds the
 agent to carry a change, or to ask about carrying it, after its upstream PR opens.
 
+A repository configured ``agents.route pr`` is the user's own and integrates through pull
+requests: the guard allows ``gh pr create`` and feature-branch pushes, and denies a commit on
+or push to the default branch.
+
 Offline only: a hook has a few seconds and must not call the network. Anything this module
 cannot parse, or any repository it cannot classify, is allowed.
 """
@@ -195,6 +199,11 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
             return _deny(_upstream_push_reason(known))
         if known and known.route == "upstream" and _pushes_origin_default(push, directory, moved):
             return _deny(_carry_reason(known, directory))
+        if known and known.route == "pr" and _pushes_origin_default(push, directory, moved):
+            repo = known.origin_repo or "this repository"
+            return _deny(f"vcs: {repo} integrates through pull requests, so never push its {known.default_branch}. "
+                         "Push your branch instead (git push -u origin HEAD) and open a PR: gh pr create. "
+                         "The PR merges on GitHub.")
         if known and known.route == "external" and _pushes_origin_default(push, directory, moved):
             repo = known.origin_repo or "this repository"
             return _deny(f"vcs: {repo} isn't the user's, so never push its {known.default_branch}. "
@@ -203,7 +212,7 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
         return None
     if not isinstance(created, GhCreate) or known is None:
         return None
-    if known.route == "external":
+    if known.route in ("external", "pr"):
         return None
     if known.route == "direct":
         if known.source != "config" and created.repo is not None and known.origin_repo \
@@ -223,8 +232,8 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved
 
 
 def _commit_misses(route: fix_route.Route | None, directory: Path) -> bool:
-    """True when a commit would land on the default branch of a fork or someone else's repo."""
-    if route is None or route.route not in (*_FORK_ROUTES, "external"):
+    """True when a commit would land on the default branch of a fork, someone else's repo, or a PR repo."""
+    if route is None or route.route not in (*_FORK_ROUTES, "external", "pr"):
         return False
     branch = fix_route.local_branch(directory)
     if not branch or branch != fix_route.remote_default(directory, "origin"):
@@ -245,6 +254,11 @@ def _fork_default(route: fix_route.Route, directory: Path) -> str:
 
 def _commit_reason(route: fix_route.Route, directory: Path) -> str:
     default = _fork_default(route, directory)
+    if route.route == "pr":
+        repo = route.origin_repo or "this repository"
+        return (f"vcs: {repo} integrates through pull requests, so nothing is committed on its {default}. "
+                "Create a branch first (git switch -c <branch>), commit there, push it "
+                "(git push -u origin HEAD), and open a PR: gh pr create. The PR merges on GitHub.")
     if route.route == "external":
         repo = route.origin_repo or "this repository"
         return (f"vcs: {repo} isn't the user's, so nothing is committed on its {default}. "

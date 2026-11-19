@@ -2,7 +2,8 @@
 
 Routes, first match wins:
 
-- ``agents.route`` is ``direct``, ``upstream``, or ``upstream+carry``
+- ``agents.route`` is ``direct``, ``pr``, ``upstream``, or ``upstream+carry``. ``pr`` is
+  only ever configured: the user's own repository that integrates through pull requests
 - a remote named ``upstream`` (local remote-tracking refs only; this never fetches)
 - otherwise who owns origin. Online, a GitHub fork with no ``upstream`` remote is
   an error before that. The login comes from ``git config --global
@@ -22,7 +23,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-ROUTES = ("direct", "upstream", "upstream+carry")
+# Values ``agents.route`` accepts. Automatic routing never produces ``pr``.
+ROUTES = ("direct", "pr", "upstream", "upstream+carry")
 TIMEOUT = 5
 
 _SLUG = re.compile(
@@ -294,6 +296,15 @@ def route_steps(route: str, origin_default: str, upstream_default: str | None,
             f"git push origin {origin_default}",
             "Do not open a pull request.",
         )
+    if route == "pr":
+        return (
+            "git switch -c <branch>",
+            "Commit on that branch.",
+            "git push -u origin HEAD",
+            "gh pr create",
+            "The PR merges on GitHub.",
+            f"Do not commit on or push {origin_default}.",
+        )
     if route == "external":
         target = upstream_target or "<origin owner/repo>"
         return (
@@ -383,7 +394,7 @@ def _configured_route(directory: Path) -> str | None:
     value = result.stdout.strip()
     if value not in ROUTES:
         raise RouteError(
-            "fix-route: agents.route must be direct, upstream, or upstream+carry "
+            "fix-route: agents.route must be direct, pr, upstream, or upstream+carry "
             f"(got {value!r})"
         )
     return value
@@ -422,7 +433,7 @@ def _origin_default(directory: Path) -> str:
 def _finish(directory: Path, route: str, source: str, origin_repo: str | None,
             upstream: str | None) -> Route:
     origin_default = _origin_default(directory)
-    if route == "direct":
+    if route in ("direct", "pr"):
         return Route(route, source, origin_default, None, origin_repo,
                      route_steps(route, origin_default, None, None))
     if upstream is None:

@@ -153,8 +153,10 @@ for any home directory. The only matcher on the shell hook is `Bash`, registered
 for both providers. `hooks/fix_route.py` decides where a change goes: a direct push to the
 user's own repository, an upstream pull request, that pull request plus a carry onto the fork's
 default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
-prints it, for debugging). Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit
-on the default branch of a fork or someone else's repository, and a push or pull request that
+prints it, for debugging). The user's own repository can opt into pull requests with
+`git config agents.route pr`; only configuration selects `pr`. Agents aren't told about routes:
+`hooks/vcs_guard.py` denies a commit on the default branch of a fork, someone else's repository,
+or a `pr` repository, and a push or pull request that
 misses the route, with a reason that is the whole instruction; after an upstream PR opens, a
 Bash PostToolUse note says to carry it or to ask about carrying. It runs offline, allows what it
 can't classify, and runs before Codex rewrites the command through RTK.

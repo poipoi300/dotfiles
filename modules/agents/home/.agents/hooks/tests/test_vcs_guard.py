@@ -154,6 +154,48 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         self.assert_allow("git push", work)
         self.assert_allow("git push origin feature", work)
 
+    def test_pr_route_allows_a_pr_and_a_feature_push_and_denies_the_default_branch(self):
+        work = self.repository(fork=False, name="own-pr")
+        self.assert_deny("gh pr create", work, "takes no PRs")
+        self.git("-C", str(work), "config", "agents.route", "pr")
+        self.assert_allow("gh pr create", work)
+        self.assert_allow("gh pr create --repo solo-owner/widget --fill", work)
+        self.assert_allow("git push -u origin feature", work)
+        self.assert_allow("git push origin HEAD:feature", work)
+        self.assert_allow("git push --dry-run origin main", work)
+        for command in ("git push origin main", "git push", "git push origin HEAD", "git push origin HEAD:main"):
+            reason = self.assert_deny(command, work, "vcs: solo-owner/widget integrates through pull requests, "
+                                                     "so never push its main.")
+            self.assertIn("git push -u origin HEAD", reason)
+            self.assertIn("gh pr create", reason)
+        self.git("-C", str(work), "switch", "-c", "feature")
+        self.assert_allow("git push", work)
+        self.assert_allow("git push origin feature", work)
+        self.assert_deny("git push origin main", work, "never push its main")
+        self.git("-C", str(work), "config", "--unset", "agents.route")
+        self.assert_deny("gh pr create", work, "takes no PRs")
+        self.git("-C", str(work), "switch", "main")
+        self.assert_allow("git push origin main", work)
+
+    def test_pr_route_denies_a_commit_on_the_default_branch_until_a_branch_exists(self):
+        work = self.repository(fork=False, name="own-pr-commit")
+        self.assert_allow("git commit -m x", work)
+        self.git("-C", str(work), "config", "agents.route", "pr")
+        reason = self.assert_deny("git commit -m x", work,
+                                  "vcs: solo-owner/widget integrates through pull requests, "
+                                  "so nothing is committed on its main.")
+        self.assertIn("git switch -c <branch>", reason)
+        self.assertIn("git push -u origin HEAD", reason)
+        self.assertIn("gh pr create", reason)
+        self.assert_allow("git commit --dry-run -m x", work)
+        self.assert_allow("git switch -c fix && git commit -m x", work)
+        git_dir = Path(self.git("-C", str(work), "rev-parse", "--absolute-git-dir").stdout.strip())
+        (git_dir / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+        self.assert_allow("git commit --no-edit", work)
+        (git_dir / "MERGE_HEAD").unlink()
+        self.git("-C", str(work), "switch", "-c", "feature")
+        self.assert_allow("git commit -m x", work)
+
     def test_unknown_login_allows_every_command(self):
         work = self.repository(fork=False, name="no-login")
         self.write_hosts_user(None)
