@@ -88,9 +88,12 @@ stays Claude-only to avoid shadowing Codex's bundled `skill-creator`. `skill-pre
 creation uses the runtime's own authoring skill.
 On 2026-11-15 six PR-workflow skills were imported from tstack (MIT, upstream commit in each
 skill's `metadata.source`, license copied beside it): `file-pr`, `babysit-pr` (with its
-`pr-wait` script), `leaving-pr-comments`, `sol-loop`, `full-send`, and `full-stop`. Local changes:
+`pr-wait` script), `leaving-pr-comments`, `sol-loop`, `full-send`, and `full-stop`. On 2026-11-18
+the first three were merged into `vcs`: `file-pr` and `leaving-pr-comments` became its "Pull
+requests" and "Comments on GitHub" sections, `babysit-pr` became `vcs/babysit.md`, and
+`pr-wait` moved to `vcs/scripts/`. Local changes:
 `pr-wait` treats an empty CI gate as passed after a 10-minute quiet period on
-that head and exits 1 when a Greptile or Macroscope check fails; `babysit-pr`
+that head and exits 1 when a Greptile or Macroscope check fails; babysit.md
 treats a watcher exit as news, checks full-send's merge gate live (paginated
 threads and the user's own comments), owns the untrusted-data rule, and does
 not fix or push on a watch-only request, and caps bot-fix rounds at the
@@ -102,10 +105,10 @@ adds `ml-reviewer` for ML changes; `full-stop` runs only on an explicit
 request, stops if auto-merge or the queue cannot be cleared, and stops at that
 gate without merging; `sol-loop` follows `agent-roles` review loops, restarts a
 failed or silent reviewer once, can fall back to another model family or a
-disclosed same-family `reviewer`, and names that reviewer above `file-pr`'s
-model line; `leaving-pr-comments` points at `babysit-pr` for untrusted data and
-attributes comments to the user's GitHub login only; `file-pr` pushes before
-filing and its model line replaces harness attribution. Compare against
+disclosed same-family `reviewer`, and names that reviewer above the PR's
+model line; the comment rules point at babysit.md for untrusted data and
+attribute comments to the user's GitHub login only; filing a PR pushes first
+and its model line replaces harness attribution. Compare against
 upstream before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
@@ -147,12 +150,14 @@ Native hook behavior lives in `hooks/behavior.py`, with thin Claude/Codex adapte
 `check`/`sync` commands when changing registrations; registrations use
 `python3 -I -B "$HOME/.agents/hooks/native.py" <provider>` so one settings file works
 for any home directory. The only matcher on the shell hook is `Bash`, registered
-for both providers. `bin/fix-route` prints where a change goes: a direct push to the user's own
-repository, an upstream pull request, that pull request plus a carry onto the
-fork's default branch, or a branch and pull request on someone else's repository.
-`hooks/vcs_guard.py` blocks a Bash push or pull request that misses the route,
-offline, and allows the command when the route is ambiguous, before Codex
-rewrites the command through RTK.
+for both providers. `hooks/fix_route.py` decides where a change goes: a direct push to the
+user's own repository, an upstream pull request, that pull request plus a carry onto the fork's
+default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
+prints it, for debugging). Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit
+on the default branch of a fork or someone else's repository, and a push or pull request that
+misses the route, with a reason that is the whole instruction; after an upstream PR opens, a
+Bash PostToolUse note says to carry it or to ask about carrying. It runs offline, allows what it
+can't classify, and runs before Codex rewrites the command through RTK.
 Claude's RTK rewrite stays its own `rtk hook claude` hook. Native hook trust and
 lifecycle delivery still require acceptance in a fresh session. Shared script
 changes use the same path in both providers; do not maintain second provider copies.

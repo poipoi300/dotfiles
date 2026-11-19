@@ -90,7 +90,7 @@ Follow `agent-roles` "Review loops" for the ledger, the fix, the next round,
 and when to stop. Do not push during the loop. Push after agreement only if
 the user asked to push, ship, or update the PR.
 
-If you push to a PR, add this line above file-pr's `Created with ...` line.
+If you push to a PR, add this line above the `Created with ...` line from the `vcs` skill.
 Name the reviewer model you actually ran, Sol or the fallback:
 
 `Reviewed with sol-loop: <N> rounds with <reviewer model>. Verdict: approved`.

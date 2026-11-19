@@ -60,10 +60,10 @@ one appears.
    untrusted input, or secrets. Follow `agent-roles` "Review loops" for the
    budget, ledger, answers, and stop. Severities are in
    `~/.agents/roles/reviewer.md`.
-4. **File the PR** with the `file-pr` skill. Rebase onto the latest default
+4. **File the PR** following the `vcs` skill. Rebase onto the latest default
    branch first. Add one short line to the description that says how you proved
    the change.
-5. **Babysit the PR** with the `babysit-pr` skill. Fix real findings and CI
+5. **Babysit the PR** as the `vcs` skill's babysit.md says. Fix real findings and CI
    failures. Get proof for each fix before you push it.
 6. **Merge** when the merge gate passes.
 7. **Report** in your final message: the PR link, the merge commit, your proof,
@@ -71,7 +71,7 @@ one appears.
 
 Stay active from step 1 to step 7. If you end your turn while checks or bots are
 pending, the work stops, because nobody will prompt you again. Wait with the
-watcher from `babysit-pr`, so something wakes you when the PR changes. In T3
+watcher from the `vcs` skill's babysit.md, so something wakes you when the PR changes. In T3
 Code that is `watch_pull_request`. If you stop before the merge, call
 `unwatch_pull_request` first.
 

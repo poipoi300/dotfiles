@@ -33,7 +33,7 @@ cannot clear auto-merge or the merge queue, stop and ask (full-send
 ## Stop at the gate
 
 Use full-send's merge gate as the readiness check. A watcher exit is not the
-gate; run the live check in `babysit-pr`. Replace full-send's merge and final
+gate; run the live check in the `vcs` skill's babysit.md. Replace full-send's merge and final
 report steps with a handoff. Proof and review must cover the final diff;
 recheck behavior changes and meaningful conflict fixes before handoff.
 

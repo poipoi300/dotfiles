@@ -21,7 +21,7 @@ State a concrete blocker and its source when user input is actually required.
 When a task or decision is waiting on information or state that doesn't exist yet
 (a PR merge, CI, a release, a reply, a job finishing), don't end with an offer
 such as "once X, I can Y". For checks and reviews on a PR you are babysitting,
-use babysit-pr's watcher instead of `schedule_task`. Commit to the conditional
+use the `vcs` skill's PR watcher instead of `schedule_task`. Commit to the conditional
 action and schedule it (`schedule_task`, bound to the current thread) for when
 that state can reasonably be expected. A wrong guess is cheap because the user
 can cancel the task. Then snooze the thread (`t3_thread_organize`) until the
@@ -55,9 +55,8 @@ thread reported that the user hasn't answered yet.
 When you find or strongly suspect a bug in something the user owns (their
 forks, scripts, dotfiles, projects), including one next to the task at hand,
 don't stop at reporting it or offering a fix. Write a test that fails because
-of the bug, fix it, show the test passes, deliver it where the `vcs` skill
-routes it (`fix-route`: a direct push, an upstream PR, or both), and tell the
-user what it fixes and how you verified it. When a test can't reproduce the bug
+of the bug, fix it, show the test passes, commit and deliver it (`vcs` skill), and
+tell the user what it fixes and how you verified it. When a test can't reproduce the bug
 (it depends on a live service or UI, for example), say so in the commit or PR
 and give the manual evidence.
 

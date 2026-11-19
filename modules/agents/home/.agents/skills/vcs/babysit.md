@@ -1,11 +1,4 @@
----
-name: babysit-pr
-description: Monitor a pull request through review and CI. Use when the user asks to monitor, watch, or babysit a PR.
-metadata:
-  source: https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a
----
-
-# Babysit PR
+# Watching a pull request
 
 Many repos have AI review bots. They're helpful, even if they are not always
 right.
@@ -52,8 +45,8 @@ branch conflicts.
 
 ### Everywhere else: `pr-wait`
 
-Wait with `scripts/pr-wait` from this skill's directory (use its absolute
-path).
+Wait with `scripts/pr-wait` from the vcs skill's directory (use its
+absolute path).
 
 ```bash
 pr-wait <pr> [--repo owner/name] [--until ready|green|any-change]
@@ -142,8 +135,8 @@ CodeRabbit is advisory, as in full-send's merge gate. Treat its findings like
 any other finding, but never wait for it and never hold a merge for it.
 
 If a review bot leaves feedback you believe is not worth addressing, reply with
-a written reason and resolve the comment. Use the `leaving-pr-comments` skill
-for every comment posted on the user's behalf.
+a written reason and resolve the comment. Every comment posted on the user's behalf follows "Comments on GitHub"
+in SKILL.md.
 
 Screenshots and videos help as well, when you have a way to upload them.
 
