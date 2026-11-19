@@ -146,10 +146,14 @@ Native hook behavior lives in `hooks/behavior.py`, with thin Claude/Codex adapte
 (`hooks/native.py`) and generated registrations from `hooks/register.py`. Run its
 `check`/`sync` commands when changing registrations; registrations use
 `python3 -I -B "$HOME/.agents/hooks/native.py" <provider>` so one settings file works
-for any home directory. The only matcher on the shell hook is `Bash` (Codex's
-PreToolUse; Claude uses RTK's own `rtk hook claude`). Native hook trust and lifecycle
-delivery still require acceptance in a fresh session. Shared script changes use the same
-path in both providers; do not maintain second provider copies.
+for any home directory. The only matcher on the shell hook is `Bash`, registered
+for both providers. `bin/fix-route` prints where a change goes: a direct push,
+an upstream pull request, or that pull request plus a carry onto the fork's
+default branch. `hooks/vcs_guard.py` blocks a Bash push or pull request that
+misses the route, offline, before Codex rewrites the command through RTK.
+Claude's RTK rewrite stays its own `rtk hook claude` hook. Native hook trust and
+lifecycle delivery still require acceptance in a fresh session. Shared script
+changes use the same path in both providers; do not maintain second provider copies.
 
 Codex runs these hooks only after they are trusted in its interactive TUI (hashes in
 `[hooks.state]` of `~/.codex/config.toml`); editing `hooks.json` requires trusting them again.

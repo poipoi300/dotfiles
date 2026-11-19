@@ -9,7 +9,7 @@ Windows setup.
 | 15 generic skills (agent-roles, building-runner-tuis, coding, council, designing-tuis, gauntlet-loop, hillclimb, humanizer, impeccable, ml-design, research-report, reverse-engineer-anything, skill-pressure-testing, systematic-debugging, vcs) | `home/.agents/skills/` |
 | MCP registry sync, skill links into Claude (`sync.py`), provider wrappers (`launch.py`, `bin/agent-*`) | `home/.agents/` |
 | Nine role briefs and the Claude/Codex adapter generators | `home/.agents/roles/` |
-| Native hooks (RTK rewrite for Codex, Impeccable design feedback, registration) | `home/.agents/hooks/` |
+| Native hooks (route guard, RTK rewrite for Codex, Impeccable design feedback, registration) | `home/.agents/hooks/` |
 | Tests | `home/.agents/tests/`, `home/.agents/hooks/tests/` |
 | RTK (github.com/rtk-ai/rtk) and the Impeccable engine, pinned and checksummed | `pkg/rtk/`, `pkg/impeccable-engine/` |
 
@@ -29,8 +29,9 @@ come from the `dev` module. `ripgrep` and `git` are expected from the base setup
    the two local packages with makepkg, links `~/.agents` files into `$HOME`, and creates the
    three instruction links.
 2. Merge the native settings by hand (they are not deployed): Claude's `settings.json` (hooks
-   run `python3 -I -B "$HOME/.agents/hooks/native.py" claude`; the shell hook is RTK's own
-   `rtk hook claude`; statusLine needs the private `usage/budget.py`), Codex's `config.toml`
+   run `python3 -I -B "$HOME/.agents/hooks/native.py" claude`; Claude's Bash
+   PreToolUse is RTK's `rtk hook claude` plus this adapter's route guard;
+   statusLine needs the private `usage/budget.py`), Codex's `config.toml`
    and `hooks.json`. Do not run `rtk init -g`: it would rewrite those files.
 3. `cp ~/.agents/mcp.example.json ~/.agents/mcp.json` and edit it (the private module ships
    a real one).

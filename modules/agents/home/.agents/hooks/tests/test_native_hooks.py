@@ -230,8 +230,10 @@ class RegistrationTests(unittest.TestCase):
             handlers = register.handlers(Path.home(), provider)
             commands = {h["command"] for groups in handlers.values() for g in groups for h in g["hooks"]}
             self.assertEqual(commands, {f'python3 -I -B "$HOME/.agents/hooks/native.py" {provider}'})
-        self.assertEqual(register.handlers(Path.home(), "codex")["PreToolUse"][0]["matcher"], "^Bash$")
-        self.assertNotIn("PreToolUse", register.handlers(Path.home(), "claude"))
+        for provider in ("claude", "codex"):
+            pre_tool = register.handlers(Path.home(), provider)["PreToolUse"][0]
+            self.assertEqual(pre_tool["matcher"], "^Bash$")
+            self.assertEqual(pre_tool["hooks"][0]["timeout"], 5)
 
     def test_hand_merged_home_relative_registration_is_recognised_as_owned(self):
         home = self.home
@@ -262,7 +264,11 @@ class RegistrationTests(unittest.TestCase):
         original = {"env": {"KEEP": "yes"}, "model": "unchanged", "hooks": {"PreToolUse": [rtk],
                     "Stop": [{"hooks": [{"command": "other checker"}]}]}, "enabledPlugins": {"delta@zed-industries": True}}
         desired = register.generated(original, self.home, "claude")
-        self.assertEqual(desired["hooks"]["PreToolUse"], [rtk])
+        self.assertEqual(desired["hooks"]["PreToolUse"][0], rtk)
+        guard = desired["hooks"]["PreToolUse"][1]
+        self.assertEqual(guard["matcher"], "^Bash$")
+        self.assertEqual(guard["hooks"][0]["timeout"], 5)
+        self.assertIn('hooks/native.py" claude', guard["hooks"][0]["command"])
         self.assertEqual(desired["hooks"]["Stop"][0], original["hooks"]["Stop"][0])
         for key in ("env", "model", "enabledPlugins"):
             self.assertEqual(desired[key], original[key])

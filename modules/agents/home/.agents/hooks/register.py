@@ -58,10 +58,10 @@ def handlers(home: Path, provider: str) -> dict:
         if matcher:
             group["matcher"] = matcher
         result[event] = [group]
-    if provider == "codex":
-        result["PreToolUse"] = [{"matcher": "^Bash$", "hooks": [
-            {"type": "command", "command": command, "timeout": 5},
-        ]}]
+    # Both providers: the route guard inspects Bash before Codex's RTK rewrite.
+    result["PreToolUse"] = [{"matcher": "^Bash$", "hooks": [
+        {"type": "command", "command": command, "timeout": 5},
+    ]}]
     return result
 
 
