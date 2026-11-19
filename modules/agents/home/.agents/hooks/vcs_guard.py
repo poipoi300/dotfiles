@@ -31,7 +31,12 @@ _GH_VALUES = {
     "-a", "--assignee", "-r", "--reviewer", "-l", "--label", "-p", "--project", "-m", "--milestone",
     "-H", "--head", "-B", "--base", "-T", "--template", "--recover", "--jq",
 }
-_IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+_IN_PROGRESS = ("MERGE_HEAD", "SQUASH_MSG", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+# Subcommands that can change the checked-out branch before a later command in the same script runs.
+_MOVES = {"switch", "checkout", "worktree", "branch", "rebase", "reset", "stash", "bisect"}
+_COMMIT_VALUES = {"-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message",
+                  "--fixup", "--squash", "--author", "--date", "-t", "--template", "--cleanup",
+                  "--trailer", "--pathspec-from-file", "-S", "--gpg-sign"}
 _FORK_ROUTES = ("upstream", "upstream+carry")
 
 
@@ -79,11 +84,21 @@ def _guard(payload: dict) -> dict | None:
     if script is None:
         return None
     cache: dict[str, object] = {}
+    moved = False
     for cwd, argv in script:
-        decision = _consider(cwd, argv, cache)
+        decision = _consider(cwd, argv, cache, moved)
         if decision:
             return decision
+        # After a branch switch the current branch is unknown until the command runs.
+        moved = moved or _moves_branch(argv, cwd)
     return None
+
+
+def _moves_branch(argv: list[str], cwd: Path | None) -> bool:
+    found = _git_subcommand(argv, cwd or Path.cwd())
+    if found is _AMBIGUOUS:
+        return True
+    return found is not None and found[1] in _MOVES
 
 
 def _remind(payload: dict) -> dict | None:
@@ -92,21 +107,31 @@ def _remind(payload: dict) -> dict | None:
     script = _script(payload)
     if script is None:
         return None
-    output = json.dumps(payload.get("tool_response"), default=str)
+    output = json.dumps(payload.get("tool_response"), default=str).lower()
+    if "already exists" in output:
+        return None
+    raw_cwd = payload.get("cwd")
+    base = Path(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else None
     cache: dict[str, object] = {}
     for cwd, argv in script:
         created = parse_gh(argv)
         if cwd is None or not isinstance(created, GhCreate) or created.repo is None:
             continue
         route = _cached_route(cwd, cache)
+        if route is _NOT_A_REPO and base is not None:
+            # Some harnesses report the directory after the command's own cd.
+            route = _cached_route(base, cache)
+            cwd = base
         if not isinstance(route, fix_route.Route) or route.route not in _FORK_ROUTES:
             continue
         if not route.upstream_repo or not fix_route.same_repo(created.repo, route.upstream_repo):
             continue
         slug = fix_route.github_slug(f"https://github.com/{route.upstream_repo}")
-        if not slug or f"github.com/{slug}/pull/" not in output:
+        if not slug or f"github.com/{slug}/pull/".lower() not in output:
             continue
-        default = route.default_branch
+        default = _fork_default(route, cwd)
+        if route.route == "upstream" and route.source == "config":
+            return None
         if route.route == "upstream+carry":
             context = (f"vcs: the fork carries its own changes, so it carries this one too: "
                        f"git switch {default} && git merge <this branch> && git push origin {default}. "
@@ -140,7 +165,7 @@ def _may_match(command: str) -> bool:
     return "gh" in command and "pr" in command and "create" in command
 
 
-def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> dict | None:
+def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object], moved: bool = False) -> dict | None:
     if not argv or cwd is None:
         return None
     push = parse_push(argv, cwd)
@@ -160,15 +185,17 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
         return None
     known = route if isinstance(route, fix_route.Route) else None
     if isinstance(commit, Commit):
-        return _deny(_commit_reason(known, directory)) if _commit_misses(known, directory) else None
+        if moved or not _commit_misses(known, directory):
+            return None
+        return _deny(_commit_reason(known, directory))
     if isinstance(push, Push):
         if push.dry_run:
             return None
-        if _pushes_upstream(push, directory) and not _explicit_direct(directory, cache):
+        if _pushes_upstream(push, directory, moved) and not _explicit_direct(directory, cache):
             return _deny(_upstream_push_reason(known))
-        if known and known.route == "upstream" and _pushes_origin_default(push, directory):
-            return _deny(_carry_reason(known))
-        if known and known.route == "external" and _pushes_origin_default(push, directory):
+        if known and known.route == "upstream" and _pushes_origin_default(push, directory, moved):
+            return _deny(_carry_reason(known, directory))
+        if known and known.route == "external" and _pushes_origin_default(push, directory, moved):
             repo = known.origin_repo or "this repository"
             return _deny(f"vcs: {repo} isn't the user's, so never push its {known.default_branch}. "
                          "Push your branch instead (git push -u origin HEAD) and open a PR: gh pr create. "
@@ -179,9 +206,14 @@ def _consider(cwd: Path | None, argv: list[str], cache: dict[str, object]) -> di
     if known.route == "external":
         return None
     if known.route == "direct":
+        if known.source != "config" and created.repo is not None and known.origin_repo \
+                and not fix_route.same_repo(created.repo, known.origin_repo):
+            # Offline, a fork without an upstream remote looks like the user's own repository.
+            return None
         repo = known.origin_repo or "This repository"
         return _deny(f"vcs: {repo} is the user's own and takes no PRs. Commit on {known.default_branch} "
-                     f"and push it: git push origin {known.default_branch}.")
+                     f"and push it: git push origin {known.default_branch}. If it is a fork, add its parent "
+                     "(git remote add upstream <url> && git fetch upstream) and try again.")
     if known.route in _FORK_ROUTES and known.upstream_repo:
         if created.repo is not None and fix_route.same_repo(created.repo, known.upstream_repo):
             return None
@@ -206,21 +238,29 @@ def _commit_misses(route: fix_route.Route | None, directory: Path) -> bool:
     return not any((git_dir / name).exists() for name in _IN_PROGRESS)
 
 
+def _fork_default(route: fix_route.Route, directory: Path) -> str:
+    """The fork's own default branch; ``route.default_branch`` is upstream's for fork routes."""
+    return fix_route.remote_default(directory, "origin") or route.default_branch
+
+
 def _commit_reason(route: fix_route.Route, directory: Path) -> str:
-    default = route.default_branch
+    default = _fork_default(route, directory)
     if route.route == "external":
         repo = route.origin_repo or "this repository"
         return (f"vcs: {repo} isn't the user's, so nothing is committed on its {default}. "
                 "Commit on a branch (git switch -c <branch>), push it (git push -u origin HEAD), "
-                "and open a PR: gh pr create. If you can't push to it, fork it and push the branch there.")
+                "and open a PR: gh pr create. If you can't push to it, fork it and push the branch there. "
+                "If the user commits to this repository directly, ask them; with their yes, "
+                "git config agents.route direct.")
     upstream = route.upstream_repo or "<upstream owner/repo>"
-    base = fix_route.remote_default(directory, "upstream") or default
+    base = fix_route.remote_default(directory, "upstream") or route.default_branch
     steps = (f"vcs: this is a fork of {upstream}; changes go to upstream as a PR, so don't commit on "
              f"the fork's {default}. git fetch upstream && git switch -c <branch> upstream/{base}, "
              f"commit there, git push -u origin HEAD, gh pr create --repo {upstream}. ")
     if route.route == "upstream+carry":
         return steps + (f"The fork carries its own changes, so then also git switch {default} && "
-                        f"git merge <branch> && git push origin {default}.")
+                        f"git merge <branch> && git push origin {default}. A change meant only for the "
+                        f"fork skips the PR: commit it on a branch, merge it into {default}, and push.")
     return steps + (f"The fork's {default} matches upstream and doesn't get the change: ask the user "
                     "whether the fork should carry it until upstream merges.")
 
@@ -231,11 +271,12 @@ def _upstream_push_reason(route: fix_route.Route | None) -> str:
             f"and open a PR: gh pr create --repo {target}.")
 
 
-def _carry_reason(route: fix_route.Route) -> str:
-    default = route.default_branch
+def _carry_reason(route: fix_route.Route, directory: Path) -> str:
+    default = _fork_default(route, directory)
+    base = fix_route.remote_default(directory, "upstream") or route.default_branch
     target = route.upstream_repo or "<upstream owner/repo>"
     return (f"vcs: the fork's {default} matches upstream and doesn't carry changes, so don't push it. "
-            f"Put the change on a branch from upstream/{default}, push that branch "
+            f"Put the change on a branch from upstream/{base}, push that branch "
             f"(git push -u origin HEAD) and open a PR: gh pr create --repo {target}. "
             "Ask the user whether the fork should carry it until upstream merges; if yes: "
             f"git config agents.route upstream+carry, then merge the branch into {default} and push it.")
@@ -274,16 +315,23 @@ def _cached_route(directory: Path, cache: dict[str, object]) -> object:
     return found
 
 
-def _pushes_upstream(push: Push, directory: Path) -> bool:
+def _pushes_upstream(push: Push, directory: Path, moved: bool = False) -> bool:
+    if push.remote is None and moved:
+        return False
     remote = push.remote if push.remote is not None else fix_route.push_remote(directory)
     if not remote:
         return False
     return _same_remote(remote, "upstream", directory)
 
 
-def _pushes_origin_default(push: Push, directory: Path) -> bool:
-    """True only when this push would update origin's default branch. Ambiguity is False."""
+def _pushes_origin_default(push: Push, directory: Path, moved: bool = False) -> bool:
+    """True only when this push would update origin's default branch. Ambiguity is False.
+
+    ``moved``: an earlier command may have switched branches, so the current branch is unknown.
+    """
     if push.delete:
+        return False
+    if push.remote is None and moved:
         return False
     remote = push.remote if push.remote is not None else fix_route.push_remote(directory)
     if not remote or not _same_remote(remote, "origin", directory):
@@ -295,10 +343,10 @@ def _pushes_origin_default(push: Push, directory: Path) -> bool:
     if push.all_branches:
         return True
     if not push.refspecs:
-        if push.tags:
+        if push.tags or moved:
             return False
         return fix_route.local_branch(directory) == default
-    current = fix_route.local_branch(directory)
+    current = None if moved else fix_route.local_branch(directory)
     return any(_refspec(refspec, default, current) == "deny" for refspec in push.refspecs)
 
 
@@ -411,8 +459,14 @@ def parse_commit(argv: list[str], cwd: Path) -> Commit | object | None:
     directory, subcommand, rest = found
     if subcommand != "commit":
         return None
-    if any(token in {"--dry-run", "-h", "--help"} for token in rest):
-        return None
+    index = 0
+    while index < len(rest):
+        token = rest[index]
+        if token == "--":
+            break
+        if token in {"--dry-run", "-h", "--help"}:
+            return None
+        index += 2 if token in _COMMIT_VALUES else 1
     return Commit(directory)
 
 

@@ -61,7 +61,12 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         fork = self.repository(ahead=False, name="fork")
         carry = self.repository(ahead=True, name="carry")
         self.assert_deny("gh pr create", direct, "vcs: solo-owner/widget is the user's own and takes no PRs. Commit on main and push it: git push origin main.")
+        # Offline, a fork without an upstream remote looks direct: a PR to another repo goes through.
+        self.assert_allow("gh pr create --repo upstream-owner/widget", direct)
+        self.assert_deny("gh pr create --repo solo-owner/widget", direct, "git remote add upstream")
+        self.git("-C", str(direct), "config", "agents.route", "direct")
         self.assert_deny("gh pr create --repo upstream-owner/widget", direct, "takes no PRs")
+        self.git("-C", str(direct), "config", "--unset", "agents.route")
         for command in ("gh pr create", "gh pr create --repo origin-owner/widget",
                         "gh pr create -R origin-owner/widget", "gh pr create --repo=https://github.com/origin-owner/widget"):
             self.assert_deny(command, fork, "gh pr create --repo upstream-owner/widget")
@@ -325,6 +330,58 @@ class GuardTests(test_fix_route.RepoFixture, unittest.TestCase):
         for provider in ("claude", "codex"):
             groups = register.handlers(Path.home(), provider)["PostToolUse"]
             self.assertEqual([group["matcher"] for group in groups], ["^(Edit|Write|apply_patch)$", "^Bash$"])
+
+
+    def test_a_branch_switch_earlier_in_the_script_makes_the_branch_unknown(self):
+        fork = self.repository(ahead=False, name="chain-fork")
+        work = self.repository(fork=False, name="chain-theirs")
+        for command in ("git fetch upstream && git switch -c fix upstream/main && git commit -am x",
+                        "git checkout -b fix && git add f && git commit -m x",
+                        "git switch -c fix && git push -u origin HEAD",
+                        "git switch -c fix && git push",
+                        "git stash && git commit -m x"):
+            self.assert_allow(command, fork)
+        self.assert_deny("git switch -c fix && git push origin main", fork, CARRY)
+        self.assert_deny("git status && git commit -m x", fork, "this is a fork")
+        self.write_hosts_user("other-person")
+        self.assert_allow("git switch -c fix && git commit -m x && git push -u origin HEAD", work)
+
+    def test_messages_name_the_fork_default_branch(self):
+        fork = self.repository(ahead=False, name="patched-fork")
+        self.git("-C", str(fork), "branch", "-m", "main", "patched")
+        self.git("-C", str(fork), "update-ref", "refs/remotes/origin/patched", "HEAD")
+        self.git("-C", str(fork), "update-ref", "-d", "refs/remotes/origin/main")
+        self.git("-C", str(fork), "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/patched")
+        self.git("-C", str(fork), "config", "agents.route", "upstream+carry")
+        reason = self.assert_deny("git commit -m x", fork, "don't commit on the fork's patched")
+        self.assertIn("upstream/main", reason)
+        self.assertIn("git switch patched && git merge <branch> && git push origin patched", reason)
+        url = "https://github.com/upstream-owner/widget/pull/9"
+        context = vcs_guard.remind(self.post("gh pr create --repo upstream-owner/widget", fork, url))
+        self.assertIn("git push origin patched", context["hookSpecificOutput"]["additionalContext"])
+
+    def test_squash_merge_and_message_values(self):
+        fork = self.repository(ahead=False, name="squash")
+        git_dir = Path(self.git("-C", str(fork), "rev-parse", "--absolute-git-dir").stdout.strip())
+        (git_dir / "SQUASH_MSG").write_text("squashed\n", encoding="utf-8")
+        self.assert_allow("git commit -m x", fork)
+        (git_dir / "SQUASH_MSG").unlink()
+        self.assert_deny("git commit -m --dry-run", fork, "this is a fork")
+        self.assert_deny("git commit -m -h", fork, "this is a fork")
+        self.assert_allow("git commit -m x --dry-run", fork)
+
+    def test_reminder_edge_cases(self):
+        fork = self.repository(ahead=False, name="remind-edge")
+        created = "gh pr create --repo upstream-owner/widget"
+        exists = {"stderr": "a pull request for branch \"fix\" into branch \"main\" already exists:\n"
+                            "https://github.com/upstream-owner/widget/pull/7"}
+        self.assertIsNone(vcs_guard.remind(self.post(created, fork, exists)))
+        upper = "https://github.com/Upstream-Owner/Widget/pull/7"
+        self.assertIsNotNone(vcs_guard.remind(self.post(created, fork, upper)))
+        self.assertIsNotNone(vcs_guard.remind(self.post(f"cd remind-edge && {created}", fork, upper)))
+        self.assertIsNotNone(vcs_guard.remind(self.post(f"cd remind-edge && {created}", fork.parent, upper)))
+        self.git("-C", str(fork), "config", "agents.route", "upstream")
+        self.assertIsNone(vcs_guard.remind(self.post(created, fork, upper)))
 
 
 if __name__ == "__main__":
