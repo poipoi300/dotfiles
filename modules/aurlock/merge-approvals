@@ -2,9 +2,10 @@
 # merge-approvals BASE OURS THEIRS: git merge driver for aurlock's approvals file.
 #
 # Merges per package base instead of per line, so two machines that each approve a
-# package (both appending at the end of the file) merge cleanly. A package changed on
-# one side only takes that side; changed differently on both, or changed on one side and
-# removed on the other, is a conflict (exit 1, OURS untouched). Comments come from OURS;
+# package (both appending at the end of the file) merge cleanly. Two lines for a package
+# are the same approval when the commit and network grant match (the date may differ).
+# A package changed on one side only takes that side; changed differently on both, or
+# changed on one side and removed on the other, is a conflict (exit 1, OURS untouched). Comments come from OURS;
 # packages only THEIRS adds are appended in THEIRS' order. The result goes to OURS.
 #
 # Registered by `update` (git config merge.aurlock-approvals.driver) and selected by the
@@ -15,12 +16,7 @@ out=$(mktemp "$2.merge-XXXXXX")
 trap 'rm -f "$out"' EXIT
 if awk '
 	function key(line,   f) { sub(/#.*/, "", line); return split(line, f) ? f[1] : "" }
-	function norm(line,   f, n, i, s) {
-		sub(/#.*/, "", line); n = split(line, f); s = f[1]
-		for (i = 2; i <= n; i++) s = s " " f[i]
-		return s
-	}
-	FNR == 1 { file++ }
+	function norm(line,   f) { sub(/#.*/, "", line); split(line, f); return f[2] " " f[6] }
 	{ k = key($0) }
 	file == 1 && k != "" { base[k] = norm($0) }
 	file == 2 { ours[++nours] = $0; if (k != "") inours[k] = norm($0) }
@@ -48,7 +44,7 @@ if awk '
 			print theirline[k]                                   # added there
 		}
 		exit conflict
-	}' "$1" "$2" "$3" >"$out"; then
+	}' file=1 "$1" file=2 "$2" file=3 "$3" >"$out"; then
 	cat "$out" >"$2"
 else
 	exit 1

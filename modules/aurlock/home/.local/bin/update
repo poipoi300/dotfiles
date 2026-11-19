@@ -3,23 +3,28 @@
 #
 # Adapted from GrunclePug's update script. aurlock's approvals are tracked in the
 # dotfiles repository so every machine installs the same AUR commits: the repository is
-# pulled first (approvals made on another machine install without asking) and new
-# approvals are committed and pushed at the end. Only the approvals file is ever
-# committed or pushed, and a push needs gitleaks and a line-format check to pass, since
-# the repository is public. Other uncommitted work in the checkout is left alone. Never
-# runs arcus apply: it ends with what `arcus plan` says.
+# pulled first and new approvals are committed and pushed at the end. Only the approvals
+# file is ever committed or pushed. The repository is public, so a push needs every
+# unpushed commit to be an "aurlock: approvals" commit by the GitHub noreply identity
+# whose whole approvals file is well-formed (no comment the remote doesn't already have),
+# and gitleaks to pass. Other uncommitted work in the checkout is left alone. Never runs
+# arcus apply: it ends with what `arcus plan` says.
 #
 # Packages pacman owns update through pacman or aurlock, never through their own
 # updaters (`codex update`, `agy update` would overwrite package files). Own builds in
 # the modules' pkg/ directories update when their PKGBUILD is bumped.
+#
+# Exit status: aurlock's when it failed, else 1 when the approvals couldn't be committed
+# or pushed, else 0.
 set -uo pipefail
 
 say() { printf '\n== %s\n' "$*"; }
 warn() { printf 'update: %s\n' "$*" >&2; }
 die() { warn "$*"; exit 1; }
 
-exec 9>"${XDG_RUNTIME_DIR:-/tmp}/update.lock"
-flock -n 9 || die "already running"
+lock=${XDG_RUNTIME_DIR:-/tmp}/update.lock
+exec 9>"$lock"
+flock -n 9 || die "already running (lock: $lock)"
 
 # The approvals file is a symlink into the repository; its target names both.
 live=$(readlink -f "$HOME/.config/aurlock/approved") && [[ -f $live ]] ||
@@ -28,12 +33,37 @@ repo=$(git -C "${live%/*}" rev-parse --show-toplevel 2>/dev/null) ||
 	die "the approvals file isn't in a git repository: $live"
 approved=${live#"$repo"/}
 g() { git -C "$repo" "$@"; }
+subject="aurlock: approvals"
+noreply='@users\.noreply\.github\.com'
 
-g symbolic-ref -q HEAD >/dev/null || die "$repo isn't on a branch"
-g rev-parse -q --verify '@{upstream}' >/dev/null || die "$repo's branch has no upstream"
-gitdir=$(g rev-parse --absolute-git-dir)
-for f in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
-	[[ -e $gitdir/$f ]] && die "$repo has a rebase or merge in progress; finish or abort it first"
+# state_ok: on the remote's default branch with an upstream, nothing in progress. Sets
+# remote and branch (the upstream's) for the push.
+state_ok() {
+	local gitdir f head
+	g symbolic-ref -q HEAD >/dev/null || { warn "$repo isn't on a branch"; return 1; }
+	upstream=$(g rev-parse -q --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) ||
+		{ warn "$repo's branch has no upstream"; return 1; }
+	remote=$(g config "branch.$(g symbolic-ref --short HEAD).remote")
+	branch=${upstream#"$remote"/}
+	head=$(g symbolic-ref -q --short "refs/remotes/$remote/HEAD" 2>/dev/null)
+	if [[ -n $head && $head != "$upstream" ]]; then
+		warn "$repo is on $upstream, not $head; switch to the default branch so the other machines get the approvals"
+		return 1
+	fi
+	gitdir=$(g rev-parse --absolute-git-dir)
+	for f in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+		[[ -e $gitdir/$f ]] && { warn "$repo has a rebase or merge in progress; finish or abort it first"; return 1; }
+	done
+	return 0
+}
+
+state_ok || die "nothing was upgraded"
+# Approvals are committed under the effective identity (environment included), so check
+# that one before anything else happens.
+for who in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
+	ident=$(g var "$who" 2>/dev/null) || die "$repo has no git identity; set the GitHub noreply address: git -C $repo config user.email <id>+<login>@users.noreply.github.com"
+	grep -qE "${noreply}> " <<<"$ident" ||
+		die "$repo's git identity isn't the GitHub noreply address; it would be published. Set it: git -C $repo config user.email <id>+<login>@users.noreply.github.com"
 done
 
 # Two machines approving different packages both append to the file; the module's merge
@@ -47,14 +77,14 @@ fi
 commit_approvals() {
 	g diff --quiet HEAD -- "$approved" && return 0
 	# A pathspec commits only this file, whatever else is staged.
-	g commit -q -m "aurlock: approvals" -- "$approved" && echo "committed approvals"
+	g commit -q -m "$subject" -- "$approved" && echo "committed approvals"
 }
 
 # pull: bring in the other machines' commits. Fast-forwards whenever git can do it without
 # touching uncommitted files; rebases local commits only in a clean checkout, and aborts a
 # rebase that conflicts. Returns non-zero on any failure.
 pull() {
-	if ! g fetch -q; then
+	if ! g fetch -q "$remote"; then
 		warn "couldn't fetch $repo (no network?)"
 		return 1
 	fi
@@ -68,39 +98,50 @@ pull() {
 		return 1
 	fi
 	if [[ -n $(g status --porcelain --untracked-files=no) ]]; then
-		warn "$repo has local commits and the other machines pushed too; rebasing needs a clean checkout. Commit or stash the uncommitted work, then run update again."
+		warn "$repo has local commits and the other machines pushed too; rebasing needs a clean checkout. Stash the uncommitted work (git -C $repo stash), run update again, then git -C $repo stash pop."
 		return 1
 	fi
-	g rebase -q '@{upstream}' && return 0
+	if g rebase -q '@{upstream}'; then return 0; fi
 	g rebase --abort
-	warn "local commits conflict with the other machines'; they're kept. Resolve by hand:
-  git -C $repo pull --rebase   (keep both machines' lines in $approved)"
+	warn "this machine and another approved the same package differently; the local commits are kept. Resolve by hand, leaving one line per package:
+  git -C $repo pull --rebase   ($approved)"
 	return 1
 }
 
-# pushable: true when everything unpushed is an approvals change in the expected format
-# and gitleaks finds nothing.
+# A record as aurlock's LoadApprovals accepts it, with the version and maintainer limited
+# to the characters pacman versions and AUR user names use.
+record='^[a-z0-9@_+][a-z0-9@._+-]* [0-9a-f]{40} [A-Za-z0-9._:+~-]+ [A-Za-z0-9._-]+ [0-9]{4}-[0-9]{2}-[0-9]{2} (offline|online)$'
+
+# pushable: true when every unpushed commit is an approvals commit by the noreply identity
+# that changes only the approvals file, leaves it well-formed, and gitleaks passes.
 pushable() {
-	local files bad
-	files=$(g log --format= --name-only --diff-merges=first-parent '@{upstream}..HEAD' | grep -vxF -e "$approved" -e '')
-	if [[ -n $files ]]; then
-		warn "unpushed commits change more than the approvals; not pushing. Push them yourself:
-$files"
-		return 1
-	fi
-	# pkgbase commit version maintainer date network, or a comment.
-	bad=$(g diff '@{upstream}..HEAD' -- "$approved" | grep '^+' | grep -v '^+++' |
-		grep -vE '^\+(#.*|[A-Za-z0-9@._+-]+ [0-9a-f]{40} [^ ]+ [^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2} [a-z]+)?$')
-	if [[ -n $bad ]]; then
-		warn "unexpected lines in the approvals; not pushing:
+	local base head commits c files bad known=()
+	base=$(g rev-parse '@{upstream}') && head=$(g rev-parse HEAD) || return 1
+	commits=$(g rev-list "$base..$head")
+	# Comments are allowed only when the remote already has them.
+	mapfile -t known < <(g show "$base:$approved" 2>/dev/null | LC_ALL=C grep -a '^#')
+	for c in $commits; do
+		files=$(g diff-tree --no-commit-id --name-only -r "$c")
+		if [[ $files != "$approved" || $(g log -1 --format=%B "$c") != "$subject" ]]; then
+			warn "unpushed commit $(g log -1 --format='%h %s' "$c") isn't an approvals commit; not pushing. Push it yourself after checking it."
+			return 1
+		fi
+		if g log -1 --format='%ae%n%ce' "$c" | grep -qvE "${noreply}\$"; then
+			warn "unpushed commit $(g log -1 --format=%h "$c") isn't by the GitHub noreply identity; not pushing"
+			return 1
+		fi
+		bad=$(g show "$c:$approved" | LC_ALL=C grep -avE "$record" | LC_ALL=C grep -avxF -e '' "${known[@]/#/-e}")
+		if [[ -n $bad ]]; then
+			warn "commit $(g log -1 --format=%h "$c") has lines aurlock doesn't write, or comments the remote doesn't have; not pushing:
 $bad"
-		return 1
-	fi
+			return 1
+		fi
+	done
 	if ! command -v gitleaks >/dev/null; then
 		warn "gitleaks isn't installed; not pushing"
 		return 1
 	fi
-	if ! gitleaks git --redact --no-banner --log-level=error --log-opts='@{upstream}..HEAD' "$repo"; then
+	if ! gitleaks git --redact --no-banner --log-level=error --log-opts="$base..$head" "$repo"; then
 		warn "gitleaks flagged the unpushed commits; not pushing"
 		return 1
 	fi
@@ -113,14 +154,19 @@ push_approvals() {
 	fi
 	pushable || return 1
 	local err
-	if err=$(g push -q 2>&1); then
+	# An explicit refspec: only this branch, whatever push.default says.
+	if err=$(g push -q "$remote" "HEAD:refs/heads/$branch" 2>&1); then
 		echo "pushed approvals"
-	elif grep -qE 'non-fast-forward|fetch first|rejected' <<<"$err" && pull && pushable && g push -q; then
-		echo "pushed approvals (after pulling the other machines')"
-	else
-		warn "approvals are committed here but not pushed: $(g rev-list --count '@{upstream}..HEAD') commit(s). Push with: git -C $repo push"
-		return 1
+		return 0
 	fi
+	if grep -qE 'non-fast-forward|fetch first|rejected' <<<"$err" && pull && pushable &&
+		g push -q "$remote" "HEAD:refs/heads/$branch"; then
+		echo "pushed approvals (after pulling the other machines')"
+		return 0
+	fi
+	warn "approvals are committed here but not pushed: $(g rev-list --count '@{upstream}..HEAD') commit(s). Fix what's above and run update again.${err:+
+$err}"
+	return 1
 }
 
 # plan_hint: what arcus would do now; never applies anything.
@@ -136,7 +182,7 @@ $plan"
 }
 
 say "dotfiles"
-commit_approvals || die "couldn't commit the approvals"
+commit_approvals || die "couldn't commit the approvals; nothing was upgraded"
 pull || die "nothing was upgraded"
 
 say "pacman"
@@ -162,8 +208,18 @@ if command -v claude >/dev/null; then
 fi
 
 say "approvals"
-commit_approvals || warn "couldn't commit the approvals"
-push_approvals
+sync=0
+# Another session may have switched branches or started a rebase during the upgrade.
+if ! state_ok; then
+	warn "approvals made during this run are left uncommitted in $approved"
+	sync=1
+elif ! commit_approvals; then
+	warn "couldn't commit the approvals"
+	sync=1
+elif ! push_approvals; then
+	sync=1
+fi
 
 plan_hint
-exit "$aur"
+((aur != 0)) && exit "$aur"
+exit "$sync"

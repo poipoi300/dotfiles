@@ -15,6 +15,7 @@ import unittest
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "home/.local/bin/update"
 APPROVED = "modules/aurlock/home/.config/aurlock/approved"
 HEADER = "# pkgbase  commit  version  maintainer  approved  network\n"
+NOREPLY = "1+t@users.noreply.github.com"
 LINE = "{name} " + "a" * 40 + " 1.0-1 someone 2026-11-18 offline\n"
 
 STUBS = {
@@ -25,6 +26,7 @@ STUBS = {
         echo aurlock "$@" >> "$STUB_LOG"
         cp "$HOME/.config/aurlock/approved" "$STUB_SEEN"
         if [ -n "${NEW_APPROVAL:-}" ]; then printf '%s\\n' "$NEW_APPROVAL" >> "$HOME/.config/aurlock/approved"; fi
+        if [ -n "${AURLOCK_HOOK:-}" ]; then sh -c "$AURLOCK_HOOK"; fi
         exit "${AURLOCK_EXIT:-0}"'''),
     "arcus": 'echo "Nothing to do."',
     "gitleaks": 'echo gitleaks "$@" >> "$STUB_LOG"; exit "${GITLEAKS_EXIT:-0}"',
@@ -67,8 +69,8 @@ class Update(unittest.TestCase):
             "XDG_RUNTIME_DIR": str(home),
             "GIT_CONFIG_GLOBAL": str(self.tmp / "gitconfig"),
             "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": NOREPLY,
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": NOREPLY,
             "STUB_LOG": str(home / "log"),
             "STUB_SEEN": str(home / "seen"),
         }
@@ -131,13 +133,15 @@ class Update(unittest.TestCase):
     def test_gitleaks_failure_keeps_the_commit_local(self):
         result = self.run_update(self.a, NEW_APPROVAL=LINE.format(name="foo").strip(), GITLEAKS_EXIT="1")
         self.assertIn("gitleaks flagged", result.stderr)
+        self.assertEqual(result.returncode, 1)
         self.git(self.a, "fetch", "-q")
         self.assertNotIn("foo ", self.remote_file())
         self.assertIn("foo ", self.git(self.a, "show", f"HEAD:{APPROVED}"))
 
     def test_an_unexpected_line_is_not_pushed(self):
         result = self.run_update(self.a, NEW_APPROVAL="foo /home/someone/secret")
-        self.assertIn("unexpected lines", result.stderr)
+        self.assertIn("lines aurlock doesn't write", result.stderr)
+        self.assertEqual(result.returncode, 1)
         self.git(self.a, "fetch", "-q")
         self.assertNotIn("secret", self.remote_file())
 
@@ -145,7 +149,8 @@ class Update(unittest.TestCase):
         (self.a / "README").write_text("local work\n")
         self.git(self.a, "commit", "-q", "-am", "local work")
         result = self.run_update(self.a, NEW_APPROVAL=LINE.format(name="foo").strip())
-        self.assertIn("more than the approvals", result.stderr)
+        self.assertIn("isn't an approvals commit", result.stderr)
+        self.assertEqual(result.returncode, 1)
         self.git(self.a, "fetch", "-q")
         self.assertNotIn("foo ", self.remote_file())
 
@@ -164,7 +169,7 @@ class Update(unittest.TestCase):
     def test_both_sides_changing_one_package_stops_before_upgrading(self):
         self.run_update(self.b, NEW_APPROVAL=LINE.format(name="same").strip())
         with open(self.a / APPROVED, "a") as handle:
-            handle.write(LINE.format(name="same").replace("1.0-1", "2.0-1"))
+            handle.write(LINE.format(name="same").replace("1.0-1", "2.0-1").replace("a" * 40, "b" * 40))
         self.git(self.a, "commit", "-q", "-am", "aurlock: approvals")
         result = self.run_update(self.a)
         self.assertEqual(result.returncode, 1)
@@ -190,6 +195,65 @@ class Update(unittest.TestCase):
         self.assertIn("foo ", self.remote_file())
 
 
+    def test_private_text_cannot_ride_along(self):
+        cases = {
+            "comment": "# approved on laptop.lan by someone@mail.example",
+            "maintainer": "foo " + "a" * 40 + " 1.0-1 someone@mail.example 2026-11-18 offline",
+            "network": "foo " + "a" * 40 + " 1.0-1 someone 2026-11-18 maybe",
+            "plusplus": "++ host.lan 10.0.0.5",
+        }
+        for label, line in cases.items():
+            with self.subTest(label):
+                result = self.run_update(self.a, NEW_APPROVAL=line)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.git(self.a, "fetch", "-q")
+                self.assertNotIn(line, self.git(self.a, "log", "-p", "origin/main"))
+                self.git(self.a, "reset", "-q", "--hard", "origin/main")
+
+    def test_a_line_added_and_removed_before_the_push_is_still_caught(self):
+        with open(self.a / APPROVED, "a") as handle:
+            handle.write("# host.lan\n")
+        self.git(self.a, "commit", "-q", "-am", "aurlock: approvals")
+        content = (self.a / APPROVED).read_text().replace("# host.lan\n", "")
+        (self.a / APPROVED).write_text(content + LINE.format(name="foo"))
+        result = self.run_update(self.a)
+        self.assertEqual(result.returncode, 1)
+        self.git(self.a, "fetch", "-q")
+        self.assertNotIn("host.lan", self.git(self.a, "log", "-p", "origin/main"))
+
+    def test_a_personal_identity_stops_before_upgrading(self):
+        result = self.run_update(self.a, GIT_AUTHOR_EMAIL="real@mail.example",
+                                 NEW_APPROVAL=LINE.format(name="foo").strip())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("noreply", result.stderr)
+        self.assertNotIn("pacman", self.log)
+
+    def test_a_feature_branch_is_refused(self):
+        self.git(self.a, "remote", "set-head", "origin", "main")
+        self.git(self.a, "switch", "-q", "-c", "feat")
+        self.git(self.a, "push", "-q", "-u", "origin", "feat")
+        result = self.run_update(self.a)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("default branch", result.stderr)
+
+    def test_a_push_rejected_mid_run_pulls_and_pushes(self):
+        hook = (f"cd {self.b} && printf '%s\\n' '{LINE.format(name='from-b').strip()}' >> {APPROVED} "
+                f"&& git commit -q -am 'aurlock: approvals' && git push -q origin main")
+        result = self.run_update(self.a, NEW_APPROVAL=LINE.format(name="zz-from-a").strip(), AURLOCK_HOOK=hook)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("after pulling", result.stdout)
+        self.git(self.a, "fetch", "-q")
+        self.assertIn("from-b ", self.remote_file())
+        self.assertIn("zz-from-a ", self.remote_file())
+
+    def test_a_rebase_started_during_the_run_leaves_approvals_uncommitted(self):
+        hook = f"mkdir {self.a}/.git/rebase-merge"
+        result = self.run_update(self.a, NEW_APPROVAL=LINE.format(name="foo").strip(), AURLOCK_HOOK=hook)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("left uncommitted", result.stderr)
+        self.assertIn("foo ", (self.a / APPROVED).read_text())
+        self.assertEqual(self.git(self.a, "rev-list", "--count", "origin/main..HEAD").strip(), "0")
+
 
 class MergeDriver(unittest.TestCase):
     """merge-approvals on its own: BASE OURS THEIRS, result in OURS."""
@@ -201,7 +265,8 @@ class MergeDriver(unittest.TestCase):
             paths = []
             for name, lines in (("base", base), ("ours", ours), ("theirs", theirs)):
                 path = pathlib.Path(directory) / name
-                path.write_text(HEADER + "".join(LINE.format(name=n).replace("1.0-1", v) for n, v in lines))
+                path.write_text(HEADER + "".join(
+                    LINE.format(name=n).replace("1.0-1", v).replace("a" * 40, v * 40) for n, v in lines))
                 paths.append(str(path))
             before = pathlib.Path(paths[1]).read_text()
             code = subprocess.run([str(self.DRIVER), *paths]).returncode
@@ -223,6 +288,24 @@ class MergeDriver(unittest.TestCase):
 
     def test_the_same_change_on_both_sides_is_clean(self):
         self.assertEqual(self.merge([("a", "1")], [("a", "2")], [("a", "2")]), [("a", "2")])
+
+    def test_an_empty_base_keeps_both_additions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base, ours, theirs = (pathlib.Path(directory) / n for n in ("base", "ours", "theirs"))
+            base.write_text("")
+            ours.write_text(LINE.format(name="a"))
+            theirs.write_text(LINE.format(name="b"))
+            self.assertEqual(subprocess.run([str(self.DRIVER), base, ours, theirs]).returncode, 0)
+            self.assertEqual([line.split()[0] for line in ours.read_text().splitlines()], ["a", "b"])
+
+    def test_the_same_commit_approved_on_two_dates_is_clean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base, ours, theirs = (pathlib.Path(directory) / n for n in ("base", "ours", "theirs"))
+            base.write_text(HEADER)
+            ours.write_text(HEADER + LINE.format(name="a"))
+            theirs.write_text(HEADER + LINE.format(name="a").replace("2026-11-18", "2026-11-19"))
+            self.assertEqual(subprocess.run([str(self.DRIVER), base, ours, theirs]).returncode, 0)
+            self.assertEqual(ours.read_text().count("a " + "a" * 40), 1)
 
     def test_divergent_changes_conflict(self):
         self.assertIsNone(self.merge([("a", "1")], [("a", "2")], [("a", "3")]))

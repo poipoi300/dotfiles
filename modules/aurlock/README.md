@@ -32,23 +32,30 @@ none are left.
 `update` (`home/.local/bin/update`, adapted from GrunclePug's) keeps every machine on
 the same approved AUR commits:
 
-1. commits a pending change to the approvals file and pulls this repository, so
-   approvals made on another machine install without asking;
-2. `sudo pacman -Syu`, `rustup update stable`, `aurlock upgrade` (review prompts as
-   usual), `claude update`;
-3. commits new approvals and pushes them, only when every unpushed commit touches
-   nothing but the approvals file, every added line has the approvals format, and
-   gitleaks passes;
+1. checks that the checkout is on the default branch with nothing in progress and that
+   its git identity is the GitHub noreply address, then commits a pending approvals
+   change and pulls this repository;
+2. `sudo pacman -Syu`, `rustup update stable`, `aurlock upgrade`, `claude update`;
+3. rechecks the checkout, commits new approvals and pushes them to the upstream branch
+   only, when every unpushed commit is an `aurlock: approvals` commit by the noreply
+   identity touching only the approvals file, every line of that file has the format
+   aurlock writes (comments only when the remote already has them), and gitleaks passes;
 4. ends with what `arcus plan` says; it never applies.
 
-Other uncommitted work in the checkout is left alone: the pull fast-forwards around it
-or stops. Packages pacman owns are never self-updated (`codex update`, `agy update`),
-and own builds in `pkg/` update when their PKGBUILD is bumped. Two machines approving
-different packages both append to the file, so `.gitattributes` gives it
-`merge-approvals`, a per-package three-way merge driver that `update` registers in the
-clone's git config; the same package approved differently on two machines is a
-conflict to resolve by hand. Each clone needs the noreply commit identity in its git
-config for the approvals commit.
+An approval pulled from another machine upgrades without a prompt while its commit is
+still the AUR head; if the AUR moved on, aurlock shows the diff since the approved
+commit. `aurlock upgrade` only upgrades installed packages, so a package another machine
+added installs on `arcus apply`. Exit status: aurlock's when it failed, else 1 when the
+approvals couldn't be committed or pushed.
+
+Other uncommitted work in the checkout is left alone: the pull fast-forwards around it,
+and rebasing local commits onto the other machines' waits for a clean checkout. Packages
+pacman owns are never self-updated (`codex update`, `agy update`), and own builds in
+`pkg/` update when their PKGBUILD is bumped. Two machines approving different packages
+both append to the file, so `.gitattributes` gives it `merge-approvals`, a per-package
+three-way merge driver that `update` registers in the clone's git config; one package
+approved at different commits on two machines is a conflict to resolve by hand, leaving
+one line per package.
 
 Tests: `python3 -I -B -m unittest discover -s modules/aurlock/test` (temporary
 repositories, every system tool stubbed).
