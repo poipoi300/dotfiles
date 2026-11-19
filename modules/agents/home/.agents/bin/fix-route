@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Print where a change in this repository goes."""
+
+import os
+import sys
+from pathlib import Path
+
+# abspath, not resolve(): arcus links this file into $HOME, and the hooks live beside it.
+ROOT = Path(os.path.abspath(__file__)).parent.parent
+sys.path.insert(0, str(ROOT / "hooks"))
+
+import fix_route
+
+if __name__ == "__main__":
+    raise SystemExit(fix_route.main())
