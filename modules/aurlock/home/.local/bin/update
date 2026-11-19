@@ -1,0 +1,169 @@
+#!/bin/bash
+# update: upgrade the whole system: pacman, rustup, aurlock's AUR packages, Claude Code.
+#
+# Adapted from GrunclePug's update script. aurlock's approvals are tracked in the
+# dotfiles repository so every machine installs the same AUR commits: the repository is
+# pulled first (approvals made on another machine install without asking) and new
+# approvals are committed and pushed at the end. Only the approvals file is ever
+# committed or pushed, and a push needs gitleaks and a line-format check to pass, since
+# the repository is public. Other uncommitted work in the checkout is left alone. Never
+# runs arcus apply: it ends with what `arcus plan` says.
+#
+# Packages pacman owns update through pacman or aurlock, never through their own
+# updaters (`codex update`, `agy update` would overwrite package files). Own builds in
+# the modules' pkg/ directories update when their PKGBUILD is bumped.
+set -uo pipefail
+
+say() { printf '\n== %s\n' "$*"; }
+warn() { printf 'update: %s\n' "$*" >&2; }
+die() { warn "$*"; exit 1; }
+
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/update.lock"
+flock -n 9 || die "already running"
+
+# The approvals file is a symlink into the repository; its target names both.
+live=$(readlink -f "$HOME/.config/aurlock/approved") && [[ -f $live ]] ||
+	die "~/.config/aurlock/approved isn't there; run arcus apply first"
+repo=$(git -C "${live%/*}" rev-parse --show-toplevel 2>/dev/null) ||
+	die "the approvals file isn't in a git repository: $live"
+approved=${live#"$repo"/}
+g() { git -C "$repo" "$@"; }
+
+g symbolic-ref -q HEAD >/dev/null || die "$repo isn't on a branch"
+g rev-parse -q --verify '@{upstream}' >/dev/null || die "$repo's branch has no upstream"
+gitdir=$(g rev-parse --absolute-git-dir)
+for f in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+	[[ -e $gitdir/$f ]] && die "$repo has a rebase or merge in progress; finish or abort it first"
+done
+
+# Two machines approving different packages both append to the file; the module's merge
+# driver merges per package instead (selected for the file by .gitattributes).
+driver=$repo/${approved%/home/.config/aurlock/approved}/merge-approvals
+if [[ -x $driver ]]; then
+	g config merge.aurlock-approvals.name "aurlock approvals, per package"
+	g config merge.aurlock-approvals.driver "$(printf '%q' "$driver") %O %A %B"
+fi
+
+commit_approvals() {
+	g diff --quiet HEAD -- "$approved" && return 0
+	# A pathspec commits only this file, whatever else is staged.
+	g commit -q -m "aurlock: approvals" -- "$approved" && echo "committed approvals"
+}
+
+# pull: bring in the other machines' commits. Fast-forwards whenever git can do it without
+# touching uncommitted files; rebases local commits only in a clean checkout, and aborts a
+# rebase that conflicts. Returns non-zero on any failure.
+pull() {
+	if ! g fetch -q; then
+		warn "couldn't fetch $repo (no network?)"
+		return 1
+	fi
+	local behind ahead
+	behind=$(g rev-list --count 'HEAD..@{upstream}')
+	ahead=$(g rev-list --count '@{upstream}..HEAD')
+	((behind == 0)) && return 0
+	if ((ahead == 0)); then
+		g merge -q --ff-only '@{upstream}' && return 0
+		warn "couldn't fast-forward $repo: uncommitted changes touch files the other machines changed. Commit or stash them, then run update again."
+		return 1
+	fi
+	if [[ -n $(g status --porcelain --untracked-files=no) ]]; then
+		warn "$repo has local commits and the other machines pushed too; rebasing needs a clean checkout. Commit or stash the uncommitted work, then run update again."
+		return 1
+	fi
+	g rebase -q '@{upstream}' && return 0
+	g rebase --abort
+	warn "local commits conflict with the other machines'; they're kept. Resolve by hand:
+  git -C $repo pull --rebase   (keep both machines' lines in $approved)"
+	return 1
+}
+
+# pushable: true when everything unpushed is an approvals change in the expected format
+# and gitleaks finds nothing.
+pushable() {
+	local files bad
+	files=$(g log --format= --name-only --diff-merges=first-parent '@{upstream}..HEAD' | grep -vxF -e "$approved" -e '')
+	if [[ -n $files ]]; then
+		warn "unpushed commits change more than the approvals; not pushing. Push them yourself:
+$files"
+		return 1
+	fi
+	# pkgbase commit version maintainer date network, or a comment.
+	bad=$(g diff '@{upstream}..HEAD' -- "$approved" | grep '^+' | grep -v '^+++' |
+		grep -vE '^\+(#.*|[A-Za-z0-9@._+-]+ [0-9a-f]{40} [^ ]+ [^ ]+ [0-9]{4}-[0-9]{2}-[0-9]{2} [a-z]+)?$')
+	if [[ -n $bad ]]; then
+		warn "unexpected lines in the approvals; not pushing:
+$bad"
+		return 1
+	fi
+	if ! command -v gitleaks >/dev/null; then
+		warn "gitleaks isn't installed; not pushing"
+		return 1
+	fi
+	if ! gitleaks git --redact --no-banner --log-level=error --log-opts='@{upstream}..HEAD' "$repo"; then
+		warn "gitleaks flagged the unpushed commits; not pushing"
+		return 1
+	fi
+}
+
+push_approvals() {
+	if [[ -z $(g rev-list '@{upstream}..HEAD') ]]; then
+		echo "nothing to push"
+		return 0
+	fi
+	pushable || return 1
+	local err
+	if err=$(g push -q 2>&1); then
+		echo "pushed approvals"
+	elif grep -qE 'non-fast-forward|fetch first|rejected' <<<"$err" && pull && pushable && g push -q; then
+		echo "pushed approvals (after pulling the other machines')"
+	else
+		warn "approvals are committed here but not pushed: $(g rev-list --count '@{upstream}..HEAD') commit(s). Push with: git -C $repo push"
+		return 1
+	fi
+}
+
+# plan_hint: what arcus would do now; never applies anything.
+plan_hint() {
+	say "arcus"
+	local plan
+	if plan=$(arcus plan 2>&1); then
+		grep -q '^Nothing to do' <<<"$plan" && echo "nothing to apply" || echo "the modules have changes to apply: run arcus apply"
+	else
+		warn "arcus plan failed:
+$plan"
+	fi
+}
+
+say "dotfiles"
+commit_approvals || die "couldn't commit the approvals"
+pull || die "nothing was upgraded"
+
+say "pacman"
+if ! sudo pacman -Syu; then
+	plan_hint
+	die "pacman failed; nothing else was upgraded"
+fi
+
+if command -v rustup >/dev/null; then
+	say "rustup" # before aurlock: AUR builds use the Rust toolchain
+	rustup update stable || warn "rustup update failed"
+fi
+
+say "aurlock"
+aurlock upgrade
+aur=$?
+((aur == 0)) || warn "aurlock upgrade failed (exit $aur); approvals made before the failure are still committed"
+
+# Claude Code is a native install outside pacman, so it updates itself.
+if command -v claude >/dev/null; then
+	say "claude"
+	claude update || warn "claude update failed"
+fi
+
+say "approvals"
+commit_approvals || warn "couldn't commit the approvals"
+push_approvals
+
+plan_hint
+exit "$aur"

@@ -1,0 +1,55 @@
+#!/bin/sh
+# merge-approvals BASE OURS THEIRS: git merge driver for aurlock's approvals file.
+#
+# Merges per package base instead of per line, so two machines that each approve a
+# package (both appending at the end of the file) merge cleanly. A package changed on
+# one side only takes that side; changed differently on both, or changed on one side and
+# removed on the other, is a conflict (exit 1, OURS untouched). Comments come from OURS;
+# packages only THEIRS adds are appended in THEIRS' order. The result goes to OURS.
+#
+# Registered by `update` (git config merge.aurlock-approvals.driver) and selected by the
+# repository's .gitattributes.
+set -eu
+[ $# -eq 3 ] || { echo "usage: merge-approvals BASE OURS THEIRS" >&2; exit 2; }
+out=$(mktemp "$2.merge-XXXXXX")
+trap 'rm -f "$out"' EXIT
+if awk '
+	function key(line,   f) { sub(/#.*/, "", line); return split(line, f) ? f[1] : "" }
+	function norm(line,   f, n, i, s) {
+		sub(/#.*/, "", line); n = split(line, f); s = f[1]
+		for (i = 2; i <= n; i++) s = s " " f[i]
+		return s
+	}
+	FNR == 1 { file++ }
+	{ k = key($0) }
+	file == 1 && k != "" { base[k] = norm($0) }
+	file == 2 { ours[++nours] = $0; if (k != "") inours[k] = norm($0) }
+	file == 3 && k != "" { if (!(k in intheirs)) order[++ntheirs] = k; intheirs[k] = norm($0); theirline[k] = $0 }
+	END {
+		for (i = 1; i <= nours; i++) {
+			line = ours[i]; k = key(line)
+			if (k == "") { print line; continue }
+			o = inours[k]
+			if (!(k in intheirs)) {
+				if (k in base && base[k] == o) continue          # THEIRS removed it
+				if (k in base) { conflict = 1; continue }        # removed there, changed here
+				print line; continue                             # added here
+			}
+			t = intheirs[k]
+			if (o == t || (k in base && t == base[k])) print line
+			else if (k in base && o == base[k]) print theirline[k]
+			else conflict = 1                                    # changed on both sides
+		}
+		for (j = 1; j <= ntheirs; j++) {
+			k = order[j]
+			if (k in inours) continue
+			if (k in base && intheirs[k] == base[k]) continue    # OURS removed it
+			if (k in base) { conflict = 1; continue }            # removed here, changed there
+			print theirline[k]                                   # added there
+		}
+		exit conflict
+	}' "$1" "$2" "$3" >"$out"; then
+	cat "$out" >"$2"
+else
+	exit 1
+fi

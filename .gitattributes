@@ -1,0 +1,2 @@
+# aurlock approvals merge per package (modules/aurlock/merge-approvals, registered by update).
+modules/aurlock/home/.config/aurlock/approved merge=aurlock-approvals
