@@ -1,0 +1,10 @@
+#!/bin/sh
+# T3 Code ships as a self-updating AppImage. The file name has no version so
+# electron-updater replaces it in place and this path stays valid.
+app="$HOME/Applications/T3-Code.AppImage"
+if [ ! -x "$app" ]; then
+    notify-send -a "T3 Code" "T3 Code is not installed" "Download the AppImage to $app" 2>/dev/null
+    echo "t3code: $app not found" >&2
+    exit 1
+fi
+exec "$app" "$@"

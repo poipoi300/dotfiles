@@ -1,5 +1,6 @@
 description = "Desktop applications"
 category    = "apps"
+dirs        = ["Applications"]   # vendor AppImages that update themselves (see README)
 
 [packages]
 local  = ["pear-desktop-poipoi", "haruneko", "svp", "python-mozjpeg-lossless-optimization", "kcc"]   # pear: own fork

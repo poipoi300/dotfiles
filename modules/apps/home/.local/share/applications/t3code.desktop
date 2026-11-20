@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=T3 Code
+GenericName=Coding agents
+Comment=Desktop app for coding agents
+Exec=t3code %U
+TryExec=t3code
+Icon=com.t3tools.T3Code
+StartupWMClass=com.t3tools.T3Code
+Terminal=false
+Categories=Development;
+Keywords=t3;agents;claude;codex;
