@@ -1,6 +1,6 @@
 description = "Desktop applications"
 category    = "apps"
-dirs        = ["Applications"]   # vendor AppImages that update themselves (see README)
+dirs        = ["Applications"]   # removed on off once empty
 
 [packages]
 local  = ["pear-desktop-poipoi", "haruneko", "svp", "python-mozjpeg-lossless-optimization", "kcc"]   # pear: own fork
@@ -11,3 +11,10 @@ pacman = ["discord", "obsidian", "krita", "krita-plugin-gmic", "partitionmanager
 aur    = ["strata-bin",   # the file manager (Dolphin and COSMIC Files tried and dropped)
           "obs-vkcapture", "qdirstat", "postybirb-bin", "filmcraft",
           "solidcraft"]
+
+# T3 Code updates itself in place; the pin is what a fresh machine starts from.
+[appimages.t3code]
+url         = "https://github.com/pingdotgg/t3code/releases/download/v0.1.11/T3-Code-x86_64.AppImage"
+sha256      = "8baa06a7bbaa3f729d69466fb211ed7006d6a6e4d800b9ecdacd831fd1686b14"
+path        = "Applications/T3-Code.AppImage"
+self_update = true
