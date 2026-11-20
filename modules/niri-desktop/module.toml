@@ -1,4 +1,4 @@
-description = "niri session with DankMaterialShell, fuzzel launcher, ghostty, portals and NetworkManager"
+description = "niri session with DMS (dux-shell, the renamed DankMaterialShell), fuzzel launcher, ghostty, portals and NetworkManager"
 category    = "desktop"
 requires    = ["audio"]
 
