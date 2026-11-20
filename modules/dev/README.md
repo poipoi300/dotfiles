@@ -1,6 +1,7 @@
 # dev
 
-Python is uv-only: every project has a `pyproject.toml` and its own venv (`uv sync`, `uv run`).
+Python environments are per project: uv, or pixi when conda packages are needed (the
+`project-setup` skill owns that choice).
 `~/.config/uv/.python-version` pins 3.15 as the default; install it once per machine with
 `uv python install 3.15`. No other system Python packages beyond what other packages pull in.
 

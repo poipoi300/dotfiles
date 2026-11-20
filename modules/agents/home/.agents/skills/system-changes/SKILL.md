@@ -50,8 +50,9 @@ unpinned code; no surprising root scripts) → own PKGBUILD in `pkg/` from the v
 release, pinned version and sha256 (verify against published checksums/signatures). Never
 `curl | sh`, never a download link from a search result, never Flatpak or self-updating
 installers unless the user agrees (then note it in the module README). Always the latest
-upstream version unless the user says otherwise. Python is uv-only (per-project venvs,
-`uv python install`); no extra system Python packages.
+upstream version unless the user says otherwise. Python environments, and their interpreters,
+come from each project's manager (uv or pixi, see project-setup); no extra system Python
+packages.
 
 ## Config hygiene
 
