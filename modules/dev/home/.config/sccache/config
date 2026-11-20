@@ -1,0 +1,3 @@
+# The root disk is small; sccache evicts least-recently-used entries past this size.
+[cache.disk]
+size = 10737418240

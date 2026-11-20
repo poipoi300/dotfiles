@@ -1,0 +1,3 @@
+# Machine-wide: a repo-level wrapper would break builds for contributors without sccache.
+[build]
+rustc-wrapper = "sccache"
