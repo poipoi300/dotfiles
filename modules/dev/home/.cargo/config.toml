@@ -1,3 +1,8 @@
 # Machine-wide: a repo-level wrapper would break builds for contributors without sccache.
 [build]
 rustc-wrapper = "sccache"
+
+# Native Linux only: wasm32, Apple and Android cross-targets keep their own linkers.
+# mold replaces rustc's default rust-lld; unpacked debug info skips the debuginfo link step.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold", "-C", "split-debuginfo=unpacked"]
