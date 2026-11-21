@@ -6,9 +6,9 @@ Windows setup.
 | Piece | Where |
 |---|---|
 | Shared instructions (`AGENTS.md`, `RTK.md`), linked as `~/.claude/CLAUDE.md`, `~/.claude/RTK.md`, `~/.codex/AGENTS.md` | `home/.agents/`, `links` in `module.toml` |
-| 15 generic skills (agent-roles, building-runner-tuis, coding, council, designing-tuis, gauntlet-loop, hillclimb, humanizer, impeccable, ml-design, research-report, reverse-engineer-anything, skill-pressure-testing, systematic-debugging, vcs) | `home/.agents/skills/` |
+| 24 generic skills (agent-roles, bro, building-runner-tuis, coding, correct, council, designing-tuis, forge, full-send, full-stop, gauntlet-loop, hillclimb, humanizer, impeccable, ml-design, project-management, project-setup, research-report, reverse-engineer-anything, skill-pressure-testing, sol-loop, systematic-debugging, system-changes, vcs) | `home/.agents/skills/` |
 | MCP registry sync, skill links into Claude (`sync.py`), provider wrappers (`launch.py`, `bin/agent-*`) | `home/.agents/` |
-| Nine role briefs and the Claude/Codex adapter generators | `home/.agents/roles/` |
+| Ten role briefs and the Claude/Codex adapter generators | `home/.agents/roles/` |
 | Native hooks (route guard, RTK rewrite for Codex, Impeccable design feedback, registration) | `home/.agents/hooks/` |
 | Tests | `home/.agents/tests/`, `home/.agents/hooks/tests/` |
 | RTK (github.com/rtk-ai/rtk) and the Impeccable engine, pinned and checksummed | `pkg/rtk/`, `pkg/impeccable-engine/` |

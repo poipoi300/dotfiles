@@ -110,6 +110,21 @@ model line; the comment rules point at babysit.md for untrusted data and
 attribute comments to the user's GitHub login only; filing a PR pushes first
 and its model line replaces harness attribution. Compare against
 upstream before updating.
+On 2026-11-21 four pieces came from pstack (Lauren Tan, `cursor/plugins/pstack`, MIT, upstream
+commit `d42aff08aa58`); the rest of pstack (`poteto-mode`, its playbooks, principles and model
+sheet) duplicates the skills above and was not adopted. `correct` and `bro` are skills, with
+the source in each `metadata.source` and the license beside it. `roles/adversary.md` adapts
+`interrogate`'s adversary brief (license in `roles/LICENSE-pstack`); `council` runs it as its
+adversarial mode, which replaces `interrogate`'s use of `arena`. `principle-attack-the-premise`
+became step 5 of Phase 4 (Phase 4.5) in `systematic-debugging`, with the license beside it. Local changes: neither skill uses
+`disable-model-invocation`, which Codex's skill validator rejects, so their descriptions limit
+when they trigger; `correct` also reads the user's recorded corrections (feedback memories,
+Claude and Codex transcripts, PR and T3 threads), sends classes that recur across repositories
+to `~/.agents` hooks or the owning skill, adds gates through forge, and files deferred classes
+as issues; `bro` (word for word the skill in backnotprop/bro, which has no license; pstack ships it under MIT) adds the plain-voice rules from pstack's `ketchup` and keeps questions waiting
+on the user; the adversary reruns each finding, reports what held and what it could not run,
+and uses `reviewer.md` severities so review loops can consume it. Compare against upstream
+before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 
@@ -137,7 +152,7 @@ or MCP health, and discovery does not establish execution compatibility for ever
 Research uses native web tools. A personalized daily brief requires connected sources;
 desktop control and account memory import still depend on host-only capabilities.
 
-Nine role bodies live in `roles/`, with descriptions/native metadata in
+Ten role bodies live in `roles/`, with descriptions/native metadata in
 `roles/catalog.json`. `roles/sync_claude.py --write` and `roles/sync_codex.py --write`
 generate the thin native Claude (`~/.claude/agents`) and Codex (`~/.codex/agents`)
 adapters; running them without that flag checks them. `agent-roles` supplies the same
