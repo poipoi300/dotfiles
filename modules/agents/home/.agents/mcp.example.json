@@ -1,5 +1,5 @@
 {
-  "$comment": "Portable example only. Copy to mcp.json and select the integrations you use. Keep secrets in inherited environment variables; a whole ${VAR} value is translated without copying its value.",
+  "$comment": "Portable example only. Copy to mcp.json and select the integrations you use. Keep secrets in inherited environment variables; a whole ${VAR} env value is translated without copying its value. Antigravity expands no references, so a ${VAR} HTTP header works for Claude, Codex and Grok but makes sync refuse once ~/.gemini exists; see README.md.",
   "mcpServers": {
     "example-stdio": {
       "type": "stdio",
@@ -9,8 +9,7 @@
     },
     "example-http": {
       "type": "http",
-      "url": "https://example.com/mcp",
-      "headers": { "X-API-Key": "${EXAMPLE_API_KEY}" }
+      "url": "https://example.com/mcp"
     }
   },
   "claudePluginOverrides": {}
