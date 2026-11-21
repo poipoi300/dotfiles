@@ -1,4 +1,4 @@
-description = "Hardware tools: RGB, keyboard firmware, fans, sensors, disks, webcam, UPS"
+description = "Hardware tools: RGB, keyboard firmware, fans, sensors, disks, webcam, UPS; zram swap size"
 category    = "system"
 
 [packages]
