@@ -123,13 +123,43 @@ The global instructions' "Preferred stack" lists the defaults. Choose by job:
   coverage through nextest (`cargo llvm-cov nextest --lcov`). `cargo-deny`
   checks advisories, licenses, bans and sources from `deny.toml`. The forge
   skill wires these up as gates.
-- **sccache is machine-wide.** The dotfiles `dev` module sets it up:
-  `modules/dev/home/.cargo/config.toml` holds the `rustc-wrapper`, and
-  `modules/dev/home/.config/sccache/config` holds the cache settings. Change
-  them there, through the system-changes skill. Never set `rustc-wrapper`,
+- **Dev build speed (`Cargo.toml`, portable across Linux/macOS/Windows):**
+  set `[profile.dev] debug = "line-tables-only"` and
+  `[profile.dev.package."*"] debug = false` in the workspace root
+  `Cargo.toml`. That keeps panic backtraces readable while eliminating giant
+  DWARF/PDB blobs from dev builds, shrinking `sccache` entries and cutting
+  codegen and link time. Never put OS- or toolchain-specific flags
+  (`split-debuginfo = "unpacked"`, `-fuse-ld=...`, `RUSTC_BOOTSTRAP`, `-Z`)
+  in a repository's `Cargo.toml` or `.cargo/config.toml`: `unpacked` breaks
+  Windows MSVC, and global linker flags break `wasm32` and cross-targets.
+- **sccache and fast linking are machine-wide.** The dotfiles `dev` module
+  sets them up: `modules/dev/home/.cargo/config.toml` holds `rustc-wrapper`
+  and target-scoped Linux x86_64 flags under
+  `[target.x86_64-unknown-linux-gnu]` (for example `-C link-arg=-fuse-ld=mold`
+  and `-C split-debuginfo=unpacked`; note `rustc >= 1.90` already defaults to
+  `rust-lld` on `x86_64-unknown-linux-gnu`, and `[build] rustflags` must not
+  carry Linux linker flags because it breaks `wasm32`/cross builds), and
+  `modules/dev/home/.config/sccache/config` holds the cache size. Change them
+  there, through the system-changes skill. Never set `rustc-wrapper`,
   `RUSTC_WRAPPER` or `CARGO_BUILD_RUSTC_WRAPPER` in a repository's
-  `.cargo/config.toml`, scripts or docs. Cargo merges the repository config
-  into every contributor's build, and fails for anyone without sccache.
+  `.cargo/config.toml`, scripts or docs (Cargo merges repo config into every
+  contributor's build, failing without sccache). Avoid overriding
+  `SCCACHE_DIR` per-repo without also setting `SCCACHE_CACHE_SIZE`: the
+  default `~/.cache/sccache` symlink already points to the large partition
+  with the configured 60 GiB cap, whereas overriding `SCCACHE_DIR` alone
+  reverts the singleton daemon to its 10 GiB default and causes thrashing.
+- **Combining `sccache`, `incremental`, and `-Z threads`:** `sccache` always
+  caches third-party dependencies (Cargo disables incremental for them), but
+  skips any crate compiled with `-C incremental=...`. When running multiple
+  parallel checkouts/worktrees of the same workspace, pass
+  `CARGO_INCREMENTAL=0` (or set `incremental = false` in `profile.dev`) so
+  `sccache` shares workspace `.rlib`s across worktrees; single-checkout edit
+  loops can keep incremental on. `RUSTC_BOOTSTRAP=1` with `-Z threads=N`
+  caches cleanly in `sccache`, but both hash into the cache key (keep flags
+  uniform so builds share cache, keep `N` modest such as `4` when multiple
+  `cargo` processes run concurrently, and treat `RUSTC_BOOTSTRAP=1` as opt-in
+  for heavy single-crate bottlenecks rather than unconditional global config
+  because it unlocks unstable `#![feature(...)]` probes for `autocfg`).
 - Release binaries build on each platform's native runner. Release
   automation belongs to forge, like the rest of CI. If forge has no release
   workflow, raise that in forge. Never let a packaging tool generate a
