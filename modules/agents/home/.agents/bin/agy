@@ -1,0 +1,4 @@
+#!/bin/sh
+# Named agy, not agent-agy: T3 Code runs a binary path as the Antigravity CLI (`agy acp`) only
+# when its file name is agy or antigravity.
+exec python3 -I -B "$HOME/.agents/launch.py" agy "$@"

@@ -188,7 +188,7 @@ class SyncTests(unittest.TestCase):
         from io import StringIO
         with mock.patch.object(launch.Path, "home", return_value=self.home), \
              mock.patch.object(launch, "apply", return_value=[]) as apply, \
-             mock.patch.object(launch, "sync_generated_adapters") as adapters, \
+             mock.patch.object(launch, "sync_generated_adapters", return_value={}) as adapters, \
              mock.patch.object(launch.os, "execv") as execv, \
              mock.patch("sys.stdout", new_callable=StringIO) as stdout:
             launch.main(["codex", "app-server", "--config", 'value with "quotes"'])
@@ -221,7 +221,7 @@ class SyncTests(unittest.TestCase):
         codex_before = self.codex.read_bytes()
         from io import StringIO
         with mock.patch.object(launch.Path, "home", return_value=self.home), \
-             mock.patch.object(launch, "sync_generated_adapters") as adapters, \
+             mock.patch.object(launch, "sync_generated_adapters", return_value={}) as adapters, \
              mock.patch.object(launch.os, "execv") as execv, mock.patch("sys.stdout", new_callable=StringIO):
             self.assertEqual(launch.main(["sync"]), 0)
         execv.assert_not_called()

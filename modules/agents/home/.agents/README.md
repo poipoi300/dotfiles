@@ -1,8 +1,9 @@
 # Shared agent configuration
 
 Edit shared skills through `~/.agents/skills/`, and MCP definitions in `~/.agents/mcp.json`.
-The same physical skill files are visible through Claude's native skills directory and Codex's
-native `.agents/skills` discovery. There is no copied library to keep in sync.
+The same physical skill files are visible through Claude's and Antigravity's native skills
+directories (links) and Codex's and Grok's native `.agents/skills` discovery. There is no
+copied library to keep in sync. The module README covers how Antigravity and Grok are wired.
 
 `~/.agents/AGENTS.md` is the common instruction source, linked into the providers' native
 global instruction paths. Project `AGENTS.md` files remain project-owned. Changing shared
@@ -26,12 +27,13 @@ sync. There is deliberately no force flag. It also refuses changes made directly
 native MCP entries; reconcile that edit with the registry and restore the last generated
 native entry before running sync again.
 
-`bin/agent-claude` and `bin/agent-codex` are optional provider wrappers (point T3 Code's
-provider `binaryPath` at them). Each runs `launch.py`, which syncs silently, regenerates the
-role agents and hook registrations, then `exec`s the real provider so arguments, protocol
-streams, signals and the exit code are the provider's. The real executable is `providers.<name>`
-in an optional local `machine.json`, else the first `claude`/`codex` on PATH that is not the
-wrapper. A flock on `state/sync.lock` serializes concurrent starts; the kernel drops it on a
+`bin/agent-claude`, `bin/agent-codex`, `bin/agy` and `bin/agent-grok` are optional provider
+wrappers (point T3 Code's provider `binaryPath` at them; T3 recognizes the Antigravity CLI by
+the file name `agy`). Each runs `launch.py`, which syncs silently, regenerates the role agents
+and hook registrations, then `exec`s the real provider so arguments, protocol streams, signals
+and the exit code are the provider's. The real executable is `providers.<name>` (`claude`,
+`codex`, `agy`, `grok`) in an optional local `machine.json`, else the first one on PATH that is
+not the wrapper. A flock on `state/sync.lock` serializes concurrent starts; the kernel drops it on a
 crash, so the file itself can remain. Providers launched without the wrappers use the latest
 generated native settings; run `launch.py sync` after editing the registry.
 
@@ -39,23 +41,35 @@ generated native settings; run `launch.py sync` after editing the registry.
 
 `mcp.json` uses the `mcpServers` object with `type`, `command`, `args`, `env`, `url`, and `headers`.
 STDIO and HTTP transports are supported; unsupported fields fail instead of being discarded.
-The registry updates only its server entries in `~/.claude.json` and a clearly marked block
-in `~/.codex/config.toml`. Unrelated settings and the unmanaged `node_repl` server are retained.
-Claude JSON metadata is preserved; existing TOML is parsed for validation, not reserialized.
+The registry updates only its server entries in `~/.claude.json`, a clearly marked block
+in `~/.codex/config.toml`, its entries in Antigravity's `~/.gemini/config/mcp_config.json` and
+its `[mcp_servers.<name>]` tables in `~/.grok/config.toml`. Unrelated settings and the
+unmanaged `node_repl` server are retained. Claude JSON metadata is preserved; the Codex TOML is
+parsed for validation, not reserialized. Grok rewrites its own `config.toml` without comments,
+so there the owned tables (plus `compat.claude.mcps = false` and the `~/.claude/skills` entry of
+`[skills] ignore`, which keep Grok from also loading the home Claude MCP entries and Claude-only
+skills) are edited in place with `python-tomlkit` and the result must differ from the original
+in nothing else. A native edit to any owned entry is drift, as for Claude and Codex. Provider
+wrappers apply every provider whose files accept the change and refuse to start only when
+their own provider's files refuse; `sync.py sync` and `launch.py sync` refuse on any conflict.
 
 Whole `${NAME}` values in STDIO `env` become Codex `env_vars` forwarding (the key must also
 be NAME). Whole `${NAME}` HTTP header values become `env_http_headers`. Constants remain
 constants. Interpolated strings, renamed variables, variable URLs, and defaults are rejected
 when they cannot be translated losslessly. For bearer authentication, put the full header
-value in the referenced environment variable. Never enter secret values into a committed
-registry. Auth/OAuth stores stay native to each client.
+value in the referenced environment variable. Grok expands `${NAME}` (and defaults) in every
+field, so its entries match Claude's; its server names must start with a letter or `_` and
+contain no `__` and no trailing `_`, or Grok skips their tools. Antigravity expands none: whole `${NAME}` STDIO `env`
+values are dropped because the server inherits them, and any other reference is rejected. Never
+enter secret values into a committed registry. Auth/OAuth stores stay native to each client.
 
 The registry is local (`mcp.json`, kept out of git); `mcp.example.json` shows the shape. The author's covers `comfyui`, `rea`, `context7` and `blender`. ComfyUI runs with `--compact`,
 which exposes only `list_tools`/`describe_tool`/`call_tool` to keep idle context small.
 REA 6.9.0 (needs Node >= 26.12.1) runs Claude-only in `hot-cold` catalog mode: 5 tools at startup,
 the rest loaded through `discover_tools`. Codex ignores MCP `tools/list_changed`, so it keeps
-the full catalog. Per-provider environment uses the optional `providerEnv` field
-(`{"claude": {...}, "codex": {...}}`), merged over `env` for that provider only. `npx` and `uvx` are
+the full catalog; Antigravity and Grok keep it too. Per-provider environment uses the optional
+`providerEnv` field (keys `claude`, `codex`, `antigravity`, `grok`), merged over `env` for that
+provider only. `npx` and `uvx` are
 launched directly. Context7's redundant Claude plugin is disabled by the
 explicit `claudePluginOverrides` field, whose native flag is tracked for drift too.
 Adding an entry to that field intentionally adopts its current plugin flag on first sync.
@@ -159,19 +173,25 @@ Research uses native web tools. A personalized daily brief requires connected so
 desktop control and account memory import still depend on host-only capabilities.
 
 Ten role bodies live in `roles/`, with descriptions/native metadata in
-`roles/catalog.json`. `roles/sync_claude.py --write` and `roles/sync_codex.py --write`
-generate the thin native Claude (`~/.claude/agents`) and Codex (`~/.codex/agents`)
-adapters; running them without that flag checks them. `agent-roles` supplies the same
+`roles/catalog.json`. `roles/sync_claude.py --write`, `roles/sync_codex.py --write`,
+`roles/sync_antigravity.py --write` and `roles/sync_grok.py --write` generate the thin native
+Claude (`~/.claude/agents`), Codex (`~/.codex/agents`), Antigravity
+(`~/.gemini/config/agents`) and Grok (`~/.grok/agents`) adapters; running them without that
+flag checks them. Antigravity gets the Claude tool grants mapped to its own tool names, since
+an agent without a `tools` list gets only a small read-only set; Codex and Grok get no list. `agent-roles` supplies the same
 briefs for cross-provider T3 delegation. Role edits belong in those common sources.
 
 ## Hooks and usage
 
-Native hook behavior lives in `hooks/behavior.py`, with thin Claude/Codex adapters
-(`hooks/native.py`) and generated registrations from `hooks/register.py`. Run its
-`check`/`sync` commands when changing registrations; registrations use
+Native hook behavior lives in `hooks/behavior.py`, with thin Claude, Codex, Grok and
+Antigravity adapters (`hooks/native.py`) and generated registrations from `hooks/register.py`.
+Run its `check`/`sync` commands when changing registrations; registrations use
 `python3 -I -B "$HOME/.agents/hooks/native.py" <provider>` so one settings file works
-for any home directory. The only matcher on the shell hook is `Bash`, registered
-for both providers. `hooks/fix_route.py` decides where a change goes: a direct push to the
+for any home directory. The only matcher on the shell hook is `Bash` for Claude and Codex,
+`^run_terminal_command$` for Grok (`~/.grok/hooks/agents.json`) and `run_command` for
+Antigravity (the `agents-common` entry of `~/.gemini/config/hooks.json`); the adapters map
+those payloads to the Claude shape the guards read, and the module README lists what each
+provider gets. `hooks/fix_route.py` decides where a change goes: a direct push to the
 user's own repository, an upstream pull request, that pull request plus a carry onto the fork's
 default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
 prints it, for debugging). The user's own repository can opt into pull requests with

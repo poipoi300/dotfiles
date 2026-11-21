@@ -1,11 +1,13 @@
 # Shared agent instructions
 
-These are personal rules shared by T3 Code, Codex, Claude Code, and Zed.
+These are personal rules shared by T3 Code, Codex, Claude Code, Antigravity,
+Grok, and Zed.
 Repository instructions add project contracts, ownership boundaries, checks, and
 version-control rules.
 
-RTK is active through a shell hook and sometimes rewrites command output. If a
-command's output looks wrong or incomplete, read `~/.agents/RTK.md`.
+RTK is active through a shell hook (not in Antigravity) and sometimes rewrites
+command output. If a command's output looks wrong or incomplete, read
+`~/.agents/RTK.md`.
 
 ## Language and communication
 
