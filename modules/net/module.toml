@@ -1,8 +1,9 @@
-description = "Sync and networking: Syncthing, KDE Connect, WireGuard"
+description = "Sync and networking: Syncthing, KDE Connect, WireGuard, RustDesk"
 category    = "apps"
 
 [packages]
 pacman = ["syncthing", "kdeconnect", "wireguard-tools"]
+aur    = ["rustdesk-bin"]
 
 [units]
 user = ["syncthing.service"]
