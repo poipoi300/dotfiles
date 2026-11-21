@@ -111,20 +111,26 @@ attribute comments to the user's GitHub login only; filing a PR pushes first
 and its model line replaces harness attribution. Compare against
 upstream before updating.
 On 2026-11-21 four pieces came from pstack (Lauren Tan, `cursor/plugins/pstack`, MIT, upstream
-commit `d42aff08aa58`); the rest of pstack (`poteto-mode`, its playbooks, principles and model
-sheet) duplicates the skills above and was not adopted. `correct` and `bro` are skills, with
+commit `d42aff08aa58`); `poteto-mode`, its playbooks, the other principles and the model sheet
+duplicate the skills above and were not adopted. `correct` and `bro` are skills, with
 the source in each `metadata.source` and the license beside it. `roles/adversary.md` adapts
 `interrogate`'s adversary brief (license in `roles/LICENSE-pstack`); `council` runs it as its
 adversarial mode, which replaces `interrogate`'s use of `arena`. `principle-attack-the-premise`
-became step 5 of Phase 4 (Phase 4.5) in `systematic-debugging`, with the license beside it. Local changes: neither skill uses
+became step 5 of Phase 4 (Phase 4.5) in `systematic-debugging`, with the license beside it. Local changes: no imported skill uses
 `disable-model-invocation`, which Codex's skill validator rejects, so their descriptions limit
 when they trigger; `correct` also reads the user's recorded corrections (feedback memories,
 Claude and Codex transcripts, PR and T3 threads), sends classes that recur across repositories
 to `~/.agents` hooks or the owning skill, adds gates through forge, and files deferred classes
 as issues; `bro` (word for word the skill in backnotprop/bro, which has no license; pstack ships it under MIT) adds the plain-voice rules from pstack's `ketchup` and keeps questions waiting
 on the user; the adversary reruns each finding, reports what held and what it could not run,
-and uses `reviewer.md` severities so review loops can consume it. Compare against upstream
-before updating.
+and uses `reviewer.md` severities so review loops can consume it. Later that day, from
+the same commit, `benchmark-checklist` came as a skill (license beside it), with this machine's
+profilers, GPU checks, and pointers to `hillclimb` and `ml-design` in place of pstack's
+playbooks; its question 5 replaces upstream's "gap smaller than the run-to-run variation" rule,
+which rejects most real improvements, with a preset run count, warmup discard, ABBA order, and
+a rank-sum test. `principle-explain-the-number` was folded into `ml-design` (license beside it),
+and `hillclimb` now judges benchmark candidates by the checklist's question 5. Compare against upstream before
+updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 
