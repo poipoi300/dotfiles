@@ -23,7 +23,9 @@ lives in issues.
     blocked, waiting on the user, or a separate change.
 - **In code:** when a code site needs a pointer to known future work, the
   comment states the constraint and links the issue
-  (`See owner/repo#123.`). There is never a bare TODO.
+  (`See owner/repo#123.`). There is never a TODO marker, linked or not:
+  forge's `no-todo` hook rejects TODO, FIXME, XXX and HACK comments and
+  TODO files.
   - When you touch a file that has TODO comments, move each one to an issue.
   - Replace the comment with the link only after the issue exists.
 - **Search before filing:** `gh issue list --state all --search "<terms>"`.
