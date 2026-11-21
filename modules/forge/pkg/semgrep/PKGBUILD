@@ -1,0 +1,53 @@
+pkgname=semgrep
+pkgver=1.186.0
+pkgrel=1
+pkgdesc='Semgrep static analysis CLI with a private Python runtime'
+arch=(x86_64)
+url='https://github.com/semgrep/semgrep'
+license=(LGPL-2.1-only)
+depends=(ca-certificates glibc)
+makedepends=(uv)
+conflicts=(semgrep-bin)
+options=(!strip !debug)
+
+_python=3.14
+_pyver=3.14.10
+_pyrelease=20261110
+_pyarchive="cpython-$_pyver+$_pyrelease-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+source=("https://github.com/astral-sh/python-build-standalone/releases/download/$_pyrelease/$_pyarchive"
+        "semgrep-$pkgver.LICENSE::https://raw.githubusercontent.com/semgrep/semgrep/v$pkgver/LICENSE"
+        'pylock.toml')
+sha256sums=('c2ff2e97422f5d3896a16e0317fd212ba977bbf2688d93a6f7a03d817506bd30'
+            '20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331'
+            'fbda15dd5b680423a2371c5d161ea380eab4b73293a363d09ac71de9a81da3ae')
+
+build() {
+    # The lock supplies only hash-pinned wheel URLs. Stage uv's entry points
+    # separately so they can be relocated together at packaging time.
+    uv --no-config --no-python-downloads --preview-features pylock pip sync \
+        --no-index --only-binary :all: --require-hashes --link-mode copy \
+        --python "$srcdir/python/bin/python$_python" \
+        --prefix "$srcdir/wheels" "$srcdir/pylock.toml"
+    cp -a "$srcdir/wheels/." "$srcdir/python/"
+}
+
+check() {
+    local version
+    version=$(PYTHONDONTWRITEBYTECODE=1 SEMGREP_ENABLE_VERSION_CHECK=0 \
+        "$srcdir/python/bin/semgrep" --version)
+    [[ $version == "$pkgver" ]]
+}
+
+package() {
+    local runtime=/usr/lib/semgrep
+    local script
+
+    install -d "$pkgdir$runtime" "$pkgdir/usr/bin"
+    cp -a "$srcdir/python/." "$pkgdir$runtime/"
+    for script in "$srcdir"/wheels/bin/*; do
+        sed -i "1c#!$runtime/bin/python$_python -I" "$pkgdir$runtime/bin/${script##*/}"
+    done
+
+    ln -s "../lib/semgrep/bin/semgrep" "$pkgdir/usr/bin/semgrep"
+    install -Dm644 "$srcdir/semgrep-$pkgver.LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
