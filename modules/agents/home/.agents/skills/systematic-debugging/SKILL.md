@@ -192,11 +192,22 @@ You MUST complete each phase before proceeding to the next.
 4. **If Fix Doesn't Work**
    - STOP
    - Count: How many fixes have you tried?
+   - If 2 fixes that rest on the same premise failed the same check: attack the premise (step 5) before anything else
    - If < 3: Return to Phase 1, re-analyze with new information
-   - **If ≥ 3: STOP and question the architecture (step 5 below)**
+   - **If ≥ 3: STOP and question the architecture (step 6 below)**
    - DON'T attempt Fix #4 without architectural discussion
 
-5. **If 3+ Fixes Failed: Question Architecture**
+5. **If 2 Fixes Sharing One Premise Failed: Attack the Premise**
+
+   Two failures of the same check point at what the fixes had in common, not at the fixes.
+
+   - Write the premise down: the one sentence every failed fix assumed ("the cache is stale", "the handler runs once").
+   - Test it directly before the next fix. Find an observation that would come out differently if the premise were false, and make it. Look at how the failures are distributed (which inputs, runs, or components fail), not only at how large they are.
+   - If the evidence contradicts the premise, look for what the failures share that it did not predict. If one part always lands on the losing side, change what puts it there instead of adding a mechanism that cleans up after it.
+
+   No third fix until the premise is written down and tested.
+
+6. **If 3+ Fixes Failed: Question Architecture**
 
    **Pattern indicating architectural problem:**
    - Each fix reveals new shared state/coupling/problem in different place
@@ -225,11 +236,14 @@ If you catch yourself thinking:
 - "Here are the main problems: [lists fixes without investigation]"
 - Proposing solutions before tracing data flow
 - **"One more fix attempt" (when already tried 2+)**
+- **A third fix that assumes the same thing as two failed ones**
 - **Each fix reveals new problem in different place**
 
 **ALL of these mean: STOP. Return to Phase 1.**
 
-**If 3+ fixes failed:** Question the architecture (see Phase 4.5)
+**If 2 fixes sharing a premise failed:** Test the premise (see Phase 4.5)
+
+**If 3+ fixes failed:** Question the architecture (see Phase 4.6)
 
 ## your human partner's Signals You're Doing It Wrong
 
@@ -254,6 +268,7 @@ If you catch yourself thinking:
 | "Reference too long, I'll adapt the pattern" | Partial understanding guarantees bugs. Read it completely. |
 | "I see the problem, let me fix it" | Seeing symptoms ≠ understanding root cause. |
 | "One more fix attempt" (after 2+ failures) | 3+ failures = architectural problem. Question pattern, don't fix again. |
+| "This fix is different from the last two" | Check what all three assume. If it is the same premise, test the premise first. |
 
 ## Quick Reference
 
