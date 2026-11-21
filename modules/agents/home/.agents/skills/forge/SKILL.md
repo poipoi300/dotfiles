@@ -13,9 +13,14 @@ fall behind.
 ## The two repositories
 
 - **forge**, at `~/src/forge` (`poipoi300/forge`), is the standards source.
-  - Its `AGENTS.md`, `.pre-commit-config.yaml`, `tools/` (`repo_hygiene.py`,
-    `coverage_gate.sh`) and `.github/workflows/ci.yml` define the gate set.
-  - `src/forge/gates.py` is forge's own gate registry.
+  - It publishes the gates projects use by reference:
+    `.pre-commit-hooks.yaml` (hygiene hooks, `no-todo`,
+    `tests-and-diff-coverage`; code in `src/forge/hooks/`) and the reusable
+    workflow `.github/workflows/gates.yml`. Its `AGENTS.md` holds the
+    working-rule sections projects link.
+  - `src/forge/gates.py` is forge's own gate registry. forge's
+    `.pre-commit-config.yaml` and `ci.yml` run the published hooks and
+    workflow on forge itself.
   - It also holds an evaluation runner (`forge.toml`, `prompts/`). The runner
     measures how agents move a project's trajectory.
   - forge's `AGENTS.md` governs changes to forge itself.
@@ -61,18 +66,22 @@ uv run --project ~/src/forge-dashboard forge-dashboard manifest validate <repo>
 - **Push stage:** tests under coverage, then `diff-cover` requiring at least
   90% coverage on changed lines against `origin/main`. Set
   `DIFF_COVER_COMPARE_BRANCH` for another base.
-- **CI** re-runs the CI-enforced gates on push and PR. forge's registry marks
-  which gates those are. A project's CI covers Linux, macOS and Windows
-  (project-setup skill). forge's own `ci.yml` runs on Ubuntu only.
-- **Hooks** are `repo: local` with `language: system`, run through the
-  project's own toolchain (`uv run`, `cargo`, `bun`). No hook is fetched
-  from the network. Install both stages:
+- **CI** re-runs every hook on push and PR through forge's `gates.yml`: each
+  OS lane runs both stages, and one job gates the merged coverage of all
+  lanes. A project's CI covers Linux, macOS and Windows (project-setup
+  skill). forge's own `ci.yml` runs on Ubuntu only.
+- **Hooks:** forge's gates come from forge's public repository at a pinned
+  `rev`, fetched with no credentials. Project-specific gates are `repo: local` with
+  `language: system`, run through the project's own toolchain (`uv run`,
+  `cargo`, `bun`). Install both stages:
   `uv run pre-commit install --install-hooks -t pre-commit -t pre-push`.
 - **Hook ids follow the contract's per-language table** (Python
   `ruff-format`, `ruff-check`, `mypy`; Rust `cargo-fmt`, `cargo-clippy`;
   TypeScript `biome`, `tsc`).
-  - The push stage has the single id `tests-and-diff-coverage`, covering
-    every language.
+  - The push stage has the single id `tests-and-diff-coverage`, forge's
+    hook, with the project's languages as args (`[--python]`, `[--rust]`
+    or both). It supports Python and Rust; a language it lacks is a forge
+    issue, not a project script.
   - Other gates (`cargo-deny`, dependency policy, schema drift) get their
     own ids, at the earliest stage their run time allows.
 - **One registry:** keep one machine-readable gate list per project, and a
@@ -91,44 +100,27 @@ uv run --project ~/src/forge-dashboard forge-dashboard manifest validate <repo>
 
 ## CI comes from forge
 
-The rule: projects consume CI from forge and never carry a copy. The same
-holds for forge's gate scripts and instructions. A project references forge
-at a pinned revision and passes only its own inputs: OS matrix, system
-packages, toolchain.
+The rule: projects consume CI, gate hooks and working rules from forge and
+never carry a copy. A project pins one forge commit in two places and moves
+both pins together:
 
-Before writing or changing a project's CI, check what forge publishes:
+- `.pre-commit-config.yaml` lists forge's published hooks under
+  `repo: https://github.com/poipoi300/forge` with `rev: <sha>`.
+- The CI workflow is a thin caller,
+  `uses: poipoi300/forge/.github/workflows/gates.yml@<sha>`, passing only
+  the project's inputs (OS matrix, apt/brew/choco packages, Rust toolchain
+  and cargo tools, uv version, env, paths to prune before coverage). The
+  inputs are listed at the top of `gates.yml`. Other jobs in the project
+  workflow (release builds, artifacts) never run gates.
+- forge is public, so neither pre-commit nor `gates.yml` needs a token or a
+  secret.
+- Pin a commit that is on forge's `main`. Never edit forge's code inside a
+  project: change forge, then move the pins.
+- The dashboard's standards check the pins (`forge-hooks`, `ci`), that every
+  published hook is referenced from forge (`base-hooks`), and that
+  `AGENTS.md` links forge's working-rule sections (`agents-sections`).
 
-```sh
-git -C ~/src/forge fetch && git -C ~/src/forge grep -l workflow_call origin/main -- .github
-git -C ~/src/forge ls-tree --name-only origin/main | grep -x .pre-commit-hooks.yaml
-```
-
-- **If forge publishes a reusable workflow:** the project's workflow is a
-  thin caller, `uses: poipoi300/forge/.github/workflows/<file>.yml@<sha>`
-  with `with:` inputs. If forge publishes `.pre-commit-hooks.yaml`, the
-  project's hooks reference forge's repository at a pinned `rev`. Delete
-  any copies they replace.
-- **If not:** forge provides no reusable workflow, composite action or
-  hook manifest. Its `ci.yml` is forge's own CI, and the dashboard's Bring up
-  to standards copies `tools/` and `AGENTS.md`'s travelling sections into
-  the project, then checks them byte for byte. That gap belongs to forge.
-  Link or file the forge issue, and close the gap in forge when the task
-  allows. Meanwhile:
-  - Never copy forge's `ci.yml`, and never write gate logic into a project
-    workflow. A project workflow only sets up toolchains and system
-    packages, then runs the registered hooks by stage
-    (`pre-commit run --hook-stage <stage> --all-files`).
-  - A project issue tracks replacing that workflow with forge's call.
-  - Files the dashboard copied from forge are never edited in the project.
-    Change forge, then re-align.
-  - The dashboard's `ci` standards check searches the project's workflow
-    text for each gate's command (`ruff format`, `cargo clippy`,
-    `diff-cover`, and so on). A workflow that runs hooks by stage, or calls
-    a reusable workflow, fails that check. That is a dashboard gap, not a
-    reason to copy gate commands into the project. Link or file its issue.
-
-Workflow conventions for any workflow you write. forge's own `ci.yml` does
-not follow them yet; bring it in line when you change it:
+Workflow conventions for any workflow you write, forge's included:
 
 - Pin every action to a full commit SHA, with the version in a comment.
 - Set `permissions: contents: read` at the top, and widen per job only when
@@ -145,20 +137,18 @@ not follow them yet; bring it in line when you change it:
    which drafts it from the repository. Validate it.
 2. **`AGENTS.md`:** follow forge's structure. Rewrite the project sections
    (intro, what makes the project special, glossary, ways to hurt yourself,
-   commands, where code lives). Keep forge's travelling sections ("A note
-   from the maintainer", "Verifying", "Commits", "Taste") as forge has them.
+   commands, where code lives). Link forge's working-rule sections ("A note
+   from the maintainer", "Verifying", "Commits", "Taste") at the pinned
+   commit under a `## Working rules from forge` section; never copy their text.
    `CLAUDE.md` contains only `@AGENTS.md`.
-3. **Hooks:** `.pre-commit-config.yaml` with forge's base hook ids and the
-   language ids. pre-commit and diff-cover come from the project's uv `dev`
-   group, so a project in another language still has a `pyproject.toml` and
-   `uv.lock` for its gate tools.
-   - The copied `tools/coverage_gate.sh` runs pytest only. A project with
-     other languages points `tests-and-diff-coverage` at its own script
-     under another name in `tools/`. That script runs every language's tests
-     under coverage and feeds all the reports to diff-cover.
+3. **Hooks:** `.pre-commit-config.yaml` with every hook forge publishes,
+   referenced from forge, plus the language ids as local hooks. pre-commit,
+   coverage and diff-cover come from the project's uv `dev` group, so a
+   project in another language still has a `pyproject.toml` and `uv.lock`
+   for its gate tools.
 4. **CI:** follow "CI comes from forge" above.
 5. **Standards:** run Bring up to standards from the dashboard. It works on
    a `forge-standards/<timestamp>` branch in a worktree, and it installs the
-   git hooks in the main checkout. Review its diff, and fix each check it
-   still reports, except the `ci` check described above.
+   git hooks in the main checkout. It writes the working-rule links and
+   copies nothing. Review its diff, and fix each check it still reports.
 6. **Commands:** list every gate command in `AGENTS.md`'s Commands table.
