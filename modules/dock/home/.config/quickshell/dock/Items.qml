@@ -20,7 +20,7 @@ Singleton {
         icon: { size: 30, peak: 128, spacing: 8, waveSlots: 3 },
         behavior: {
             output: "", hideOnFullscreen: true, hideOnMaximized: true,
-            folderHoverDelayMs: 350, folderLeaveDelayMs: 450, thumbnails: true
+            revealDelayMs: 150, folderHoverDelayMs: 350, folderLeaveDelayMs: 450, thumbnails: true
         }
     })
 

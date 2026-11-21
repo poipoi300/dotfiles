@@ -8,12 +8,14 @@ import Qt.labs.folderlistmodel
 Item {
     id: panel
 
-    property bool open: false
+    property bool open: false          // latched open (takes keyboard focus)
+    property real g: 0                 // growth 0..1, driven by the dock's open intent
+    property real dropY: 0             // offset while dropping away with the dock
     property real anchorCx: 0          // x (parent coordinates) the panel grows out of
     property real bottomY: 0           // y of the panel's bottom edge
     property var stack: []             // [{type, name, items|path}]
     readonly property var cur: stack.length ? stack[stack.length - 1] : null
-    readonly property bool hovered: hover.hovered
+    readonly property var root: stack.length ? stack[0] : null
     // number of entries of the shown level, straight from whichever view is active (an
     // imperative reset missed levels with the same count as the previous one)
     readonly property int count: groupView.item ? groupView.item.count
@@ -21,6 +23,7 @@ Item {
 
     signal closeRequested()
     signal runNode(var node)
+    signal navigating()                // about to show another level (geometry still the old one)
 
     readonly property real cellW: 96
     readonly property real cellH: 104
@@ -33,44 +36,46 @@ Item {
 
     function openNode(node) {
         stack = [node];
-        forceActiveFocus();
+        if (open) forceActiveFocus();
     }
-    function push(node) { stack = stack.concat([node]); fade.restart(); }
+    function clear() { if (!visible) stack = []; }
+    onOpenChanged: if (open) forceActiveFocus()
+    function push(node) { navigating(); stack = stack.concat([node]); fade.restart(); }
+    function fadeIn() { fade.restart(); }
     function popTo(depth) {   // keep `depth` levels
         if (depth < 1 || depth >= stack.length) return;
+        navigating();
         stack = stack.slice(0, depth);
         fade.restart();
     }
     function back() { if (stack.length > 1) popTo(stack.length - 1); else closeRequested(); }
 
-    // grow animation
-    property real g: open ? 1 : 0
-    Behavior on g {
-        NumberAnimation {
-            duration: panel.open ? 240 : 140
-            easing.type: panel.open ? Easing.OutBack : Easing.InCubic
-            easing.overshoot: 1.2
-        }
-    }
     visible: g > 0.01
     opacity: Math.min(1, g * 1.6)
     onVisibleChanged: if (!visible) stack = []
 
-    width: cols * cellW + 2 * pad
+    // Wide enough for the grid and the breadcrumb (up to the window width). Size changes animate
+    // only between levels of an open panel: while it grows out of the icon (contents still
+    // loading) they snap, so the growth stays one motion.
+    readonly property real gridW: cols * cellW
+    readonly property real maxW: (parent ? parent.width : gridW + 2 * pad) - 16
+    width: Math.min(maxW, Math.max(gridW, headerBox.naturalHeaderW) + 2 * pad)
     height: headerH + shownRows * cellH + pad
-    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-    Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    onMaxWChanged: headerBox.recalc()
+    Behavior on width { enabled: panel.open && panel.g > 0.99; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+    Behavior on height { enabled: panel.open && panel.g > 0.99; NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
     x: Math.max(8, Math.min(anchorCx - width / 2, (parent ? parent.width : 0) - width - 8))
     y: bottomY - height
 
-    transform: Scale {
-        origin.x: panel.anchorCx - panel.x
-        origin.y: panel.height + 24
-        xScale: 0.15 + 0.85 * panel.g
-        yScale: 0.15 + 0.85 * panel.g
-    }
-
-    HoverHandler { id: hover }
+    transform: [
+        Scale {
+            origin.x: panel.anchorCx - panel.x
+            origin.y: panel.height + 24
+            xScale: 0.15 + 0.85 * panel.g
+            yScale: 0.15 + 0.85 * panel.g
+        },
+        Translate { y: panel.dropY }
+    ]
 
     focus: open
     Keys.onEscapePressed: panel.closeRequested()
@@ -99,13 +104,65 @@ Item {
     TapHandler { }
 
     // ---- header: back button + breadcrumb ----
-    Row {
-        id: header
+    // The back button stays pinned on the left; if the path is wider than the window-limited
+    // panel, middle crumbs elide first (then root, then current) so nothing is clipped away.
+    Item {
+        id: headerBox
         x: panel.pad
+        width: panel.width - 2 * panel.pad
         height: panel.headerH
-        spacing: 6
+
+        property real naturalHeaderW: 0
+        property var crumbMaxW: []
+
+        function recalc() {
+            const n = crumbs.count;
+            const backW = panel.stack.length > 1 ? 28 + 6 : 0;
+            const nat = [];
+            let sepTotal = 0;
+            for (let i = 0; i < n; i++) {
+                const it = crumbs.itemAt(i);
+                nat.push(it ? Math.ceil(it.naturalTextW) : 0);
+                if (i > 0) sepTotal += (it ? Math.ceil(it.sepW) : 14) + 12; // sep + inner & row spacing
+            }
+            let textSum = 0;
+            for (let i = 0; i < n; i++) textSum += nat[i];
+            naturalHeaderW = backW + sepTotal + textSum;
+
+            const avail = Math.max(0, (panel.maxW - 2 * panel.pad) - backW - sepTotal);
+            const out = nat.slice();
+            let over = textSum - avail;
+            // 1. Elide middle crumbs first so root and current stay readable.
+            if (over > 0 && n > 2) {
+                let midSpare = 0;
+                for (let i = 1; i < n - 1; i++) midSpare += Math.max(0, out[i] - 18);
+                if (midSpare > 0) {
+                    const take = Math.min(over, midSpare);
+                    let taken = 0;
+                    for (let i = 1; i < n - 1; i++) {
+                        const sp = Math.max(0, out[i] - 18);
+                        const cut = Math.min(sp, Math.ceil(sp * take / midSpare), take - taken);
+                        out[i] -= cut;
+                        taken += cut;
+                    }
+                    over -= taken;
+                }
+            }
+            // 2. If still over, elide the root crumb.
+            if (over > 0 && n > 1) {
+                const cut = Math.min(over, Math.max(0, out[0] - 32));
+                out[0] -= cut;
+                over -= cut;
+            }
+            // 3. If still over, elide the current crumb so it never overflows.
+            if (over > 0 && n > 0) {
+                out[n - 1] = Math.max(24, out[n - 1] - over);
+            }
+            crumbMaxW = out;
+        }
 
         Rectangle {
+            id: backBtn
             visible: panel.stack.length > 1
             width: 28
             height: 28
@@ -126,31 +183,53 @@ Item {
             TapHandler { id: backTap; onTapped: panel.back() }
         }
 
-        Repeater {
-            model: panel.stack
-            delegate: Row {
-                required property var modelData
-                required property int index
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-                Text {
-                    visible: index > 0
-                    text: "›"
-                    color: Theme.textDim
-                    font.pixelSize: 14
-                    font.family: Theme.font
+        Row {
+            id: header
+            x: backBtn.visible ? backBtn.width + 6 : 0
+            width: Math.max(0, parent.width - x)
+            height: panel.headerH
+            spacing: 6
+            clip: true
+
+            Repeater {
+                id: crumbs
+                model: panel.stack
+                onCountChanged: headerBox.recalc()
+                delegate: Row {
+                    required property var modelData
+                    required property int index
+                    readonly property real naturalTextW: crumbLabel.implicitWidth
+                    readonly property real sepW: sep.visible ? sep.implicitWidth : 0
                     anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: modelData.name
-                    color: crumbHover.hovered && index < panel.stack.length - 1 ? Theme.accent : Theme.text
-                    opacity: index === panel.stack.length - 1 ? 1 : 0.65
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
-                    font.family: Theme.font
-                    anchors.verticalCenter: parent.verticalCenter
-                    HoverHandler { id: crumbHover }
-                    TapHandler { enabled: index < panel.stack.length - 1; onTapped: panel.popTo(index + 1) }
+                    spacing: 6
+                    Component.onCompleted: headerBox.recalc()
+                    Text {
+                        id: sep
+                        visible: index > 0
+                        text: "›"
+                        color: Theme.textDim
+                        font.pixelSize: 14
+                        font.family: Theme.font
+                        anchors.verticalCenter: parent.verticalCenter
+                        onImplicitWidthChanged: headerBox.recalc()
+                    }
+                    Text {
+                        id: crumbLabel
+                        readonly property real maxW: index < headerBox.crumbMaxW.length
+                            ? headerBox.crumbMaxW[index] : implicitWidth
+                        width: Math.min(implicitWidth, maxW)
+                        text: modelData.name
+                        elide: index === panel.stack.length - 1 ? Text.ElideMiddle : Text.ElideRight
+                        color: crumbHover.hovered && index < panel.stack.length - 1 ? Theme.accent : Theme.text
+                        opacity: index === panel.stack.length - 1 ? 1 : 0.65
+                        font.pixelSize: 14
+                        font.weight: Font.DemiBold
+                        font.family: Theme.font
+                        anchors.verticalCenter: parent.verticalCenter
+                        onImplicitWidthChanged: headerBox.recalc()
+                        HoverHandler { id: crumbHover }
+                        TapHandler { enabled: index < panel.stack.length - 1; onTapped: panel.popTo(index + 1) }
+                    }
                 }
             }
         }
@@ -159,13 +238,13 @@ Item {
     // ---- body ----
     Item {
         id: body
-        x: panel.pad
+        x: (panel.width - width) / 2
         y: panel.headerH
         width: panel.cols * panel.cellW
         height: panel.shownRows * panel.cellH
         clip: true
 
-        NumberAnimation on opacity { id: fade; from: 0; to: 1; duration: 140; running: false }
+        NumberAnimation on opacity { id: fade; from: 0; to: 1; duration: 95; running: false }
 
         Text {
             anchors.centerIn: parent

@@ -5,6 +5,7 @@
     "output": "",
     "hideOnFullscreen": true,
     "hideOnMaximized": true,
+    "revealDelayMs": 150,
     "folderHoverDelayMs": 350,
     "folderLeaveDelayMs": 450,
     "thumbnails": true
