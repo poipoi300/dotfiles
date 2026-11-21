@@ -17,7 +17,11 @@ Turn the user's request into a short contract and state it before iterating:
 - Goal, scope, constraints, artifact, and what counts as an improvement.
 - Acceptance criteria and verification method. Use actual tests or metrics where
   they establish success. Use [Council](../council/SKILL.md) for subjective or
-  otherwise unverifiable criteria. Mixed goals require both.
+  otherwise unverifiable criteria. Mixed goals require both. A measured number
+  (speed, latency, throughput) needs a harness vetted with the
+  [benchmark-checklist](../benchmark-checklist/SKILL.md) skill before the
+  baseline, and a model score one vetted with [ml-design](../ml-design/SKILL.md);
+  then freeze the harness so every run prints its error and work counts.
 - Supplied limits: absolute deadline with timezone, maximum rounds, and quota
   allocation with unit and accounting source. A duration starts when the run
   starts unless the user says otherwise. Keep unspecified limits unset.
@@ -33,6 +37,8 @@ does not consume a round, but does consume time and quota. A round is one
 candidate improvement attempt and its evaluation; failed attempts count too.
 Track attempts started and completed so interruption cannot hide consumed rounds.
 If the baseline already meets every acceptance criterion, finish immediately.
+For a benchmark number or a model score, also reserve time and quota for the
+final confirmation (see Keep or reject); like the baseline, it uses no round.
 
 For Council verification, load Council and agree on its fixed rubric, reviewers,
 aggregation, and target before the first review. Each changed candidate needs a
@@ -92,6 +98,16 @@ or extend any limit to evade an allocation, restriction, or user stop.
    evaluators disagree materially, investigate the evidence within the limits.
    Unmet acceptance criteria may improve incrementally: fixing some baseline
    failures can be progress even while other required checks still fail.
+   A benchmark number improves only when question 5 of the
+   benchmark-checklist calls the candidate better, with the error count not
+   higher and the work count equal; a changed work count voids the comparison.
+   A model score improves only when the gap clears ml-design's noise floor
+   across seeds or folds. Council-judged criteria keep Council's aggregation.
+   The best of many rounds is partly luck, so before reporting it, confirm the
+   final best against the baseline in a fresh run, or re-score it on data no
+   round selected on. The confirmed number is the one reported and the one that
+   decides success. If the confirmation cannot run within the limits, report
+   the best as unconfirmed and likely optimistic.
 5. **Record and continue.** Log the round, attempted change, candidate identifier,
    results, best candidate, elapsed time, and known quota usage. Check acceptance
    and all limits again. If neither success nor a limit applies, start the next
@@ -109,7 +125,8 @@ the round count, clock, or accounting.
 
 ## Finish honestly
 
-On success, return the exact passing candidate with its supporting evaluation.
+On success, return the exact passing candidate with its supporting evaluation,
+which is the confirmation when one applies.
 At a deadline, round cap, or quota limit, preserve and return the best evaluated
 candidate, say the target remains unmet if so, and identify the binding limit.
 Do not spend beyond that limit to obtain a nicer final evaluation; report the
