@@ -14,7 +14,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import model_guard
+from sync import provider_enabled
+
+# Antigravity's hooks.json is shared by named hooks; this is the one these scripts own.
+ANTIGRAVITY_HOOK = "agents-common"
+GROK_SHELL = "^run_terminal_command$"
+GROK_DELEGATE = "^(spawn_subagent|t3-code__delegate_task)$"
 
 
 def read_json(path: Path) -> dict:
@@ -25,15 +32,25 @@ def read_json(path: Path) -> dict:
         return {}
 
 
-def atomic_json(path: Path, value: dict) -> None:
+def json_text(value: dict) -> bytes:
+    return json.dumps(value, allow_nan=False).encode("utf-8")
+
+
+def atomic_bytes(path: Path, content: bytes) -> None:
+    # Through a symlink to its target, so a native file managed elsewhere stays a link.
+    path = Path(os.path.realpath(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, allow_nan=False)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def atomic_json(path: Path, value: dict) -> None:
+    atomic_bytes(path, json_text(value))
 
 
 def python_command(home: Path, script: str, argument: str) -> str:
@@ -51,6 +68,19 @@ def python_command(home: Path, script: str, argument: str) -> str:
 
 def handlers(home: Path, provider: str) -> dict:
     command = python_command(home, "hooks/native.py", provider)
+    if provider == "grok":
+        # Grok's own tool names; it fails open when a hook cannot run.
+        handler = {"type": "command", "command": command, "timeout": 5}
+        return {"PreToolUse": [{"matcher": GROK_SHELL, "hooks": [handler]},
+                               {"matcher": GROK_DELEGATE, "hooks": [dict(handler)]}],
+                "PostToolUse": [{"matcher": GROK_SHELL, "hooks": [dict(handler)]}]}
+    if provider == "antigravity":
+        # Antigravity denies the tool call when a hook exits non-zero (a missing script while arcus
+        # relinks, say); `|| true` keeps that a pass-through. Exact tool names, one group each.
+        handler = {"type": "command", "command": f"{command} || true", "timeout": 10}
+        return {"PreToolUse": [{"matcher": "run_command", "hooks": [handler]},
+                               {"matcher": "mcp_t3-code_delegate_task", "hooks": [dict(handler)]}],
+                "SessionStart": [{**handler, "timeout": 20}]}
     result = {}
     for event, matcher, timeout in (
         ("SessionStart", None, 20),
@@ -88,6 +118,10 @@ def legacy_handler(handler: dict, home: Path) -> bool:
 
 
 def owned_view(config: dict, home: Path, provider: str) -> dict:
+    if provider == "grok":
+        return config  # ~/.grok/hooks/agents.json holds nothing else
+    if provider == "antigravity":
+        return {ANTIGRAVITY_HOOK: config[ANTIGRAVITY_HOOK]} if ANTIGRAVITY_HOOK in config else {}
     result = {}
     for event, groups in config.get("hooks", {}).items():
         selected = []
@@ -105,6 +139,10 @@ def owned_view(config: dict, home: Path, provider: str) -> dict:
 
 
 def generated(config: dict, home: Path, provider: str) -> dict:
+    if provider == "grok":
+        return {"hooks": handlers(home, provider)}
+    if provider == "antigravity":
+        return {**config, ANTIGRAVITY_HOOK: handlers(home, provider)}
     result = copy.deepcopy(config)
     hooks = result.setdefault("hooks", {})
     for event, groups in list(hooks.items()):
@@ -136,53 +174,116 @@ def digest(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
-def synchronize(home: Path, apply: bool = False) -> list[str]:
+def native_files(home: Path) -> list[tuple[str, Path]]:
+    files = [("claude", home / ".claude/settings.json"), ("codex", home / ".codex/hooks.json")]
+    if provider_enabled(home, "antigravity"):
+        files.append(("antigravity", home / ".gemini/config/hooks.json"))
+    if provider_enabled(home, "grok"):
+        files.append(("grok", home / ".grok/hooks/agents.json"))
+    return files
+
+
+def restore(written: list[tuple[str, Path, bytes | None, bytes]]) -> None:
+    """Undo writes that still hold this run's bytes; one destination failing does not stop the rest."""
+    for _, path, original, content in reversed(written):
+        try:
+            # A native harness may have saved the file since; never discard that save.
+            if (path.read_bytes() if path.exists() else None) != content:
+                continue
+            if original is None:
+                # The file was written through any link at the path; remove what was written.
+                Path(os.path.realpath(path)).unlink(missing_ok=True)
+            else:
+                atomic_bytes(path, original)
+        except OSError:
+            continue
+
+
+def synchronize(home: Path, apply: bool = False, problems: dict | None = None) -> list[str]:
+    """Regenerate owned registrations. With `problems`, a provider whose file refuses (drift, a
+    foreign entry, an unwritable destination) is recorded there and skipped while the others
+    proceed; otherwise any refusal raises and nothing changes."""
     root = home / ".agents" / "hooks"
     state_path = root / "state" / "registrations.json"
     state = read_json(state_path)
     updates = []
-    new_state = {}
-    for provider, path in (("claude", home / ".claude/settings.json"), ("codex", home / ".codex/hooks.json")):
-        original = path.read_bytes() if path.exists() else None
-        config = json.loads(original) if original is not None else {}
-        if not isinstance(config, dict):
-            raise TypeError("Native settings must be an object")
-        current_digest = digest(owned_view(config, home, provider))
-        if provider in state and state[provider] != current_digest:
-            raise ValueError(f"Owned {provider} hook registration drift; reconcile before regenerating")
-        desired = generated(config, home, provider)
+    # A provider that is absent or refused keeps its record for the next run.
+    new_state = dict(state)
+
+    def refuse(provider: str, error: Exception) -> None:
+        problems[provider] = error
+        if provider in state:
+            new_state[provider] = state[provider]
+        else:
+            new_state.pop(provider, None)
+
+    for provider, path in native_files(home):
+        try:
+            original = path.read_bytes() if path.exists() else None
+            config = json.loads(original) if original is not None and original.strip() else {}
+            if not isinstance(config, dict):
+                raise TypeError("Native settings must be an object")
+            current = owned_view(config, home, provider)
+            if provider in state and state[provider] != digest(current):
+                raise ValueError(f"Owned {provider} hook registration drift; reconcile before regenerating")
+            desired = generated(config, home, provider)
+            if (provider in ("grok", "antigravity") and provider not in state and current
+                    and current != owned_view(desired, home, provider)):
+                # Claude and Codex handlers are recognized by their command; these files are not.
+                raise ValueError(f"Existing {provider} hook entry was not written by this script; reconcile it first")
+            # Serialized now, so a value JSON cannot write (NaN in a foreign entry) refuses here.
+            content = json_text(desired) if desired != config else None
+        except (ValueError, TypeError, AttributeError, KeyError, OSError) as error:
+            # Malformed or unreadable files stay inside their provider too (`{"hooks": []}`).
+            if problems is None:
+                raise
+            refuse(provider, error)
+            continue
         new_state[provider] = digest(owned_view(desired, home, provider))
-        if desired != config:
-            updates.append((provider, path, original, desired))
+        if content is not None:
+            updates.append((provider, path, original, content))
     if not apply:
         return [provider for provider, *_ in updates]
+    if not updates and new_state == state:
+        return []
     if updates:
-        backup = root / "backups" / f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
-        backup.mkdir(parents=True)
+        backup = root / "backups"
+        backup.mkdir(mode=0o700, parents=True, exist_ok=True)
+        backup.chmod(0o700)
+        backup = backup / f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
+        backup.mkdir(mode=0o700)
+        backup.chmod(0o700)  # mkdir's mode is masked by the umask, which can drop even the owner's x
         manifest = {}
         for provider, path, original, _ in updates:
             saved = backup / f"{provider}.json"
             if original is not None:
-                saved.write_bytes(original)
+                # Native settings can hold credentials; the umask must not widen the copy.
+                descriptor = os.open(saved, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(original)
             manifest[str(path)] = str(saved) if original is not None else None
         atomic_json(backup / "manifest.json", manifest)
-        completed = []
+    written = []
+    for update in updates:
+        provider, path, original, content = update
         try:
-            for provider, path, original, desired in updates:
-                # Native settings can be edited while this script runs.
-                if (path.read_bytes() if path.exists() else None) != original:
-                    raise ValueError(f"Concurrent native {provider} settings edit; registration refused")
-                atomic_json(path, desired)
-                completed.append((path, original))
-        except Exception:
-            for path, original in reversed(completed):
-                if original is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    path.write_bytes(original)
-            raise
-    atomic_json(state_path, new_state)
-    return [provider for provider, *_ in updates]
+            # Native settings can be edited while this script runs.
+            if (path.read_bytes() if path.exists() else None) != original:
+                raise ValueError(f"Concurrent native {provider} settings edit; registration refused")
+            atomic_bytes(path, content)
+            written.append(update)
+        except (OSError, ValueError) as error:
+            if problems is None:
+                restore(written)
+                raise
+            refuse(provider, error)  # a file at ~/.grok/hooks fails only Grok
+    try:
+        # In the same transaction: new files with old digests would read as drift next time.
+        atomic_json(state_path, new_state)
+    except Exception:
+        restore(written)
+        raise
+    return [provider for provider, *_ in written]
 
 
 def main() -> None:
