@@ -1,16 +1,17 @@
 # Personal fork of pear-devs/pear-desktop (YouTube Music desktop app) with extra global shortcuts
 # (rewind/seek N seconds, like, dislike, truly-global modifier combos). Replaces the AUR pear-desktop.
-# Source: github.com/poipoi300/youtube-music-more-shortcuts, branch wip/windows-migration-2026-11-pear-desktop
+# Source: github.com/poipoi300/youtube-music-more-shortcuts, branch shortcuts-on-upstream
 # (the default branch `master` is based on upstream of Feb 2025 and is 1400+ commits behind; this branch carries
-# the same changes ported onto upstream 3.12.0). Pinned to a commit. Dependencies come from the lockfile
+# the same changes ported onto upstream 3.12.0, plus the new-player-UI controls fix from upstream PR #4750).
+# Pinned to a commit. Dependencies come from the lockfile
 # (`pnpm install --frozen-lockfile`); the network is used at build time only.
 # Packaging follows the AUR pear-desktop recipe: electron-builder `dir` target against the system Electron.
 pkgname=pear-desktop-poipoi
 _app_id=com.github.th-ch.youtube-music
-_commit=6735ce51e402c220b48226806e3e83879834124b
+_commit=37563d837228ee88d170df64741b2e1c497b6987
 _electronversion=43
 pkgver=3.12.1
-pkgrel=2
+pkgrel=3
 pkgdesc="YouTube Music desktop app (pear-desktop), personal fork with extra global shortcuts"
 arch=(x86_64)
 url="https://github.com/poipoi300/youtube-music-more-shortcuts"
@@ -22,19 +23,16 @@ conflicts=(pear-desktop youtube-music)
 options=(!strip !debug)
 source=("git+$url.git#commit=$_commit"
         "pear-desktop.sh"
-        "$_app_id.desktop"
-        "new-ui-skip.patch")
+        "$_app_id.desktop")
 sha256sums=('SKIP'
             'bf77b9390f6657d6b58613600cc76178da9ffa97cce55b8d0ba50b4c2ab7f996'
-            'dd4bcc23a6c9b76223b35f035b85dd38db409633ab596d46a0c6f7517ecfe7cf'
-            '37ccd4953e13b264befb3155f3a2e46d4daa3ab0f7ced6816f798f107fbcb6e0')
+            'dd4bcc23a6c9b76223b35f035b85dd38db409633ab596d46a0c6f7517ecfe7cf')
 
 _src=youtube-music-more-shortcuts
 
 prepare() {
   sed -i "s|@ELECTRONVERSION@|$_electronversion|" "$srcdir/pear-desktop.sh"
   cd "$_src"
-  patch -Np1 -i "$srcdir/new-ui-skip.patch"
   export PNPM_HOME="$srcdir/pnpm-home" ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_store_dir="$srcdir/pnpm-store"
   pnpm install --frozen-lockfile
 }
