@@ -67,6 +67,7 @@ reply format are defined in `~/.agents/roles/reviewer.md`.
 
 The `sol-loop` skill launches the reviewer and follows this section.
 
-Claude (`~/.claude/agents`) and Codex (`~/.codex/agents`) have generated native
+Claude (`~/.claude/agents`), Codex (`~/.codex/agents`), Antigravity
+(`~/.gemini/config/agents`) and Grok (`~/.grok/agents`) have generated native
 agents with these names that read the same files. Other runtimes may not, and
 a role's access contract is a prompt constraint, not a tool sandbox.

@@ -28,13 +28,20 @@ spawn them by name when authorized by the current task. If delegation is unavail
 directly and disclose that a review was not independent. A read-only role's
 access contract still applies; prompt constraints are not an OS sandbox.
 
-Regenerate/check the Claude and Codex adapters:
+Antigravity's subagents in `~/.gemini/config/agents` and Grok's agents in
+`~/.grok/agents` are generated the same way; Antigravity's carry the Claude tool
+grants mapped to its native tool names.
+
+Regenerate/check the adapters (`launch.py sync` runs all of them; the Antigravity
+and Grok ones only once `~/.gemini` and `~/.grok` exist):
 
 ```sh
 python3 -I -B ~/.agents/roles/sync_codex.py --write
 python3 -I -B ~/.agents/roles/sync_codex.py
 python3 -I -B ~/.agents/roles/sync_claude.py --write
 python3 -I -B ~/.agents/roles/sync_claude.py
+python3 -I -B ~/.agents/roles/sync_antigravity.py --write
+python3 -I -B ~/.agents/roles/sync_grok.py --write
 ```
 
 The check is read-only (0 current, 1 regeneration needed, 2 invalid input).
