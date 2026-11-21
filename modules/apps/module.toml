@@ -18,3 +18,11 @@ url         = "https://github.com/pingdotgg/t3code/releases/download/v0.1.11/T3-
 sha256      = "8baa06a7bbaa3f729d69466fb211ed7006d6a6e4d800b9ecdacd831fd1686b14"
 path        = "Applications/T3-Code.AppImage"
 self_update = true
+
+# Nightly channel beside the stable build; it shares ~/.t3 and the Electron
+# profile, so only one of the two runs at a time.
+[appimages.t3code-nightly]
+url         = "https://github.com/pingdotgg/t3code/releases/download/v0.1.12-nightly.20261121.5024/T3-Code-Nightly-x86_64.AppImage"
+sha256      = "523394fa3b93f0e8376785208aef845f83bbb5df089086259fe08fcfc1bb717e"
+path        = "Applications/T3-Code-Nightly.AppImage"
+self_update = true

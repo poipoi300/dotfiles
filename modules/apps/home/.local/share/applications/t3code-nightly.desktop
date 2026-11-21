@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=T3 Code Nightly
+GenericName=Coding agents
+Comment=Desktop app for coding agents (nightly channel)
+Exec=t3code-nightly %U
+TryExec=t3code-nightly
+Icon=com.t3tools.T3Code
+StartupWMClass=com.t3tools.T3Code
+Terminal=false
+Categories=Development;
+Keywords=t3;agents;claude;codex;nightly;
