@@ -1,0 +1,6 @@
+description = "Host tools for Forge and Forge Dashboard"
+category    = "dev"
+
+[packages]
+pacman = ["bubblewrap", "bun", "git", "github-cli", "gitleaks", "osv-scanner", "rustup", "uv"]
+local  = ["semgrep"]
