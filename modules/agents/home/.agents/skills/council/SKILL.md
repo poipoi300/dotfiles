@@ -1,6 +1,6 @@
 ---
 name: council
-description: Use only when the user mentions council, or when a hillclimb result cannot be verified with hard tests. Ordinary implementation and feature reviews use the relevant reviewer subagent, not council.
+description: Use only when the user mentions council, asks to interrogate or adversarially review a change or design or stress-test it by trying to break it, or when a hillclimb result cannot be verified with hard tests. Ordinary implementation and feature reviews use the relevant reviewer subagent, not council.
 ---
 
 # Council
@@ -8,7 +8,8 @@ description: Use only when the user mentions council, or when a hillclimb result
 Gather independent agents' judgments about the same artifact. Council evaluates;
 the caller decides and implements changes. It runs when the user asks for it, or
 to judge a [Hillclimb](../hillclimb/SKILL.md) candidate that hard tests cannot
-verify.
+verify. A request to interrogate a change or design, or to break it, runs the
+[adversarial council](#adversarial-council).
 
 ## Set the review contract
 
@@ -78,6 +79,51 @@ Ask each reviewer for criterion-level judgments and requested scores; concrete
 evidence or locations; important strengths, defects, and uncertainties; whether
 the target is met; and the highest-impact improvements. Reviewers should identify
 real defects without manufacturing objections or awarding unsupported praise.
+
+## Adversarial council
+
+When the user asks to interrogate a change or design, or to stress-test it by
+trying to break it, or the review contract accepts only findings proven by a
+run, the panel is made of adversaries. The rest of this skill applies, with
+these changes:
+
+- **Contract.** The candidate is the named scope, by default the branch diff
+  from its merge base through the working tree, reviewed as it stands: skip the
+  step that first fixes known issues and open PR comments. Identify it by its
+  HEAD sha plus the hash of the uncommitted patch below. State its intent in
+  your own words from the user's message, the commits, and the PR description;
+  ask only when an unclear intent would change what counts as broken. There is
+  no rubric or score. The question is whether the change breaks its intent.
+- **Panel.** Each seat runs the `adversary` role
+  (`~/.agents/roles/adversary.md`) with the same scope and intent and no
+  assigned focus; different model families find different failures. Seats keep
+  the adversary's report format; the criterion judgments, scores, and
+  improvements Council otherwise asks for do not apply. Adversaries run code.
+  When their repros must live inside the tree, give each its own worktree
+  through the harness's isolation. A fresh worktree holds only committed state,
+  so also pass the candidate's HEAD sha, a patch of its uncommitted tracked
+  changes (`git diff --binary HEAD > <patch>`), and an archive of its untracked
+  files (`git ls-files -o --exclude-standard -z | tar --null -T - -czf
+  <archive>`). Run both from the repository root (`git rev-parse
+  --show-toplevel`) and write the patch and archive to a scratch directory
+  outside the tree. The adversary switches its worktree to that sha (detached) if it
+  differs, applies the patch, and unpacks the archive before attacking.
+- **Verify.** Rerun every reported command yourself, in its reported working
+  directory after checking that it holds the candidate. Keep a finding when the
+  output shows the failure and the failure breaks the intent. Drop the rest,
+  and merge findings that share a root cause. Remove the adversaries'
+  worktrees once verification is done.
+- **Verdict.** No vote: one verified finding is enough, and the result keeps
+  every verified finding, whichever adversary reported it. A verified blocker
+  or should means fail. At least two completed adversaries with no verified
+  finding, or only nits, means pass, worded as "not broken by the attacks under
+  Held"; it is not a quality judgment. Anything else is unverified.
+- **Report.** This replaces the compact evaluation below, keeping its coverage
+  line (adversaries completed and requested, with provider and model). Give the
+  intent; each verified finding with its command, its output, how it breaks the
+  intent, and which adversaries found it, or "no verified findings"; for each
+  adversary, how many findings were dropped and why; the "Could not run" checks
+  still open; and the verdict. Apply no fixes.
 
 ## Synthesize the evidence
 

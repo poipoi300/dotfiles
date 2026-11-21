@@ -1,6 +1,6 @@
 ---
 name: agent-roles
-description: Use the shared reviewer, verifier, data-profiler, Explore, ML reviewer, or Impeccable worker briefs when a task needs one of these roles or asks to delegate to one, especially for a T3 delegated task on another provider. Also load it for a review loop (budget, ledger, answering findings, and when to stop). Does not itself authorize delegation.
+description: Use the shared reviewer, adversary, verifier, data-profiler, Explore, ML reviewer, or Impeccable worker briefs when a task needs one of these roles or asks to delegate to one, especially for a T3 delegated task on another provider. Also load it for a review loop (budget, ledger, answering findings, and when to stop). Does not itself authorize delegation.
 ---
 
 # Shared agent roles
@@ -15,6 +15,7 @@ Honor a request to work directly or without further subagents.
 | Role | Brief |
 | --- | --- |
 | General code review | `~/.agents/roles/reviewer.md` |
+| Break a change, proven by runs | `~/.agents/roles/adversary.md` |
 | Scoped project checks | `~/.agents/roles/verifier.md` |
 | Data schema and anomalies | `~/.agents/roles/data-profiler.md` |
 | Read-only code search | `~/.agents/roles/Explore.md` |
@@ -55,6 +56,11 @@ reply format are defined in `~/.agents/roles/reviewer.md`.
   `~/.agents/roles/reviewer.md`. Its "sound" report counts as APPROVE. An
   unverified suspicion that would be a blocker gets its suggested check run
   before the loop ends.
+- An `adversary` uses the same severities. Rerun each of its findings before
+  acting on it. Its `VERDICT: NOT BROKEN` counts as APPROVE only for the
+  attacks it lists under Held, and a "Could not run" item that would be a
+  blocker gets its command run before the loop ends. An adversary does not
+  replace the `reviewer` where AGENTS.md requires a review.
 - Finish on `APPROVE` for the current diff with no blocker or should open. If an
   item stays disputed after two replies, or the budget runs out, show both sides
   in two or three lines and let the user decide. Budget end is not approval.

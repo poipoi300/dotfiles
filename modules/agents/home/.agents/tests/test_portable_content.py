@@ -48,7 +48,7 @@ def frontmatter(path: Path) -> tuple[dict, str]:
 @needs_yaml
 class InstalledContentTests(unittest.TestCase):
     @installed
-    def test_all_nine_codex_adapters_match_catalog_and_load_shared_briefs(self):
+    def test_every_codex_adapter_matches_catalog_and_loads_shared_brief(self):
         import tomllib
         roles = renderer.load_catalog(ROLES)
         for role in roles:
@@ -62,9 +62,9 @@ class InstalledContentTests(unittest.TestCase):
                 self.assertIn((ROLES / role["brief"]).as_posix(), config["developer_instructions"])
 
     @installed
-    def test_all_nine_adapters_match_catalog_and_load_shared_briefs(self):
+    def test_all_ten_adapters_match_catalog_and_load_shared_briefs(self):
         roles = renderer.load_catalog(ROLES)
-        self.assertEqual(len(roles), 9)
+        self.assertEqual(len(roles), 10)
         for role in roles:
             with self.subTest(role=role["name"]):
                 path = HOME / ".claude/agents" / role["brief"]

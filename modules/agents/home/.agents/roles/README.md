@@ -1,6 +1,8 @@
 # Shared role briefs
 
-The nine Markdown briefs in this directory are the maintained task bodies.
+The ten Markdown briefs in this directory are the maintained task bodies.
+`adversary.md` adapts the adversary brief from pstack's `interrogate` skill
+(MIT, © 2026 Lauren Tan, see `LICENSE-pstack`).
 `catalog.json` owns descriptions and Claude's supported native metadata.
 Claude's files under `~/.claude/agents` are generated adapters that explicitly
 read these briefs. Every adapter inherits the session's chosen model; the old

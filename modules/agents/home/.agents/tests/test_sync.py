@@ -249,8 +249,9 @@ class SyncTests(unittest.TestCase):
             launch.sync_generated_adapters(self.home)
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
-        self.assertEqual(len(list((self.home / ".claude/agents").glob("*.md"))), 9)
-        self.assertEqual(len(list((self.home / ".codex/agents").glob("*.toml"))), 9)
+        roles = len(json.loads((MODULE.parent / "roles/catalog.json").read_text())["roles"])
+        self.assertEqual(len(list((self.home / ".claude/agents").glob("*.md"))), roles)
+        self.assertEqual(len(list((self.home / ".codex/agents").glob("*.toml"))), roles)
         self.assertIn("SessionStart", json.loads((self.home / ".codex/hooks.json").read_text())["hooks"])
 
     def test_startup_adapter_failure_is_reported_on_stderr_and_not_fatal(self):

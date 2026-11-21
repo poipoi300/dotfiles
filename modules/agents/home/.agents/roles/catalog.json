@@ -2,6 +2,17 @@
   "schemaVersion": 1,
   "roles": [
     {
+      "name": "adversary",
+      "description": "Tries to break a change or design and proves each break by running the real code (a failing test, a repro script, or command output); opinions from reading alone are not findings. Use for adversarial or proof-required review, alone or as a Council seat. Reports findings; does not fix them.",
+      "brief": "adversary.md",
+      "claude": {
+        "model": "inherit",
+        "effort": "high",
+        "tools": "Bash, Read, Grep, Glob",
+        "maxTurns": 40
+      }
+    },
+    {
       "name": "data-profiler",
       "description": "Profiles a dataset (CSV/Parquet/JSON) and reports schema, nulls, ranges, cardinality, and anomalies. Use before writing any code that consumes a dataset, per the never-assume-data-shape rule.",
       "brief": "data-profiler.md",
