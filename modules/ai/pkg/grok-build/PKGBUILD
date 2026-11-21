@@ -5,8 +5,9 @@
 # Upstream publishes NO checksum or signature; the sha256 below is trust-on-first-use of the .zst, after
 # confirming x.ai and the GCS mirror serve byte-identical files. Bump: read https://x.ai/cli/stable,
 # download the new .zst from both hosts, compare, update pkgver + sha256.
+# managed_config.toml turns Grok's self-updater off so pacman stays the only update path.
 pkgname=grok-build
-pkgver=1.0.77
+pkgver=1.0.92
 pkgrel=1
 pkgdesc="Grok Build, xAI's terminal AI coding agent (official prebuilt binary)"
 arch=(x86_64)
@@ -15,12 +16,15 @@ license=(Apache-2.0)
 depends=(glibc)
 makedepends=(zstd)
 options=(!strip !debug)
+backup=(etc/grok/managed_config.toml)
 _srcrev=2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8
 source=("grok-$pkgver-linux-x86_64.zst::https://x.ai/cli/grok-$pkgver-linux-x86_64.zst"
-        "LICENSE-$pkgname::https://raw.githubusercontent.com/xai-org/grok-build/$_srcrev/LICENSE")
+        "LICENSE-$pkgname::https://raw.githubusercontent.com/xai-org/grok-build/$_srcrev/LICENSE"
+        managed_config.toml)
 noextract=("grok-$pkgver-linux-x86_64.zst")
-sha256sums=('9bcc2226a486514520782de69bb0ba2c2b2dca0c3586d9a1c73f8a3077cccb20'
-            '116f7778b9802e569b7fa3a532b17bd80eb13c67837def01eed093d4ea472f28')
+sha256sums=('af6423d41f3216536c7ca11cc4bb0c3841aeff16e706e92a9e9cee8486acb9f4'
+            '116f7778b9802e569b7fa3a532b17bd80eb13c67837def01eed093d4ea472f28'
+            '09d85f9fade1454555a7685b9e2bb060bda275e34f016479447d45dba13afab6')
 
 prepare() {
   zstd -dq -f "grok-$pkgver-linux-x86_64.zst" -o grok
@@ -28,5 +32,6 @@ prepare() {
 
 package() {
   install -Dm755 grok "$pkgdir/usr/bin/grok"
+  install -Dm644 managed_config.toml "$pkgdir/etc/grok/managed_config.toml"
   install -Dm644 "LICENSE-$pkgname" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

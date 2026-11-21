@@ -1,0 +1,5 @@
+# Installed by the grok-build package. pacman updates Grok, so Grok's own updater stays off:
+# left on, an interactive `grok` downloads each release into ~/.grok/downloads and links it from
+# ~/.grok/bin, a second copy next to /usr/bin/grok. A user ~/.grok/config.toml can override this.
+[cli]
+auto_update = false
