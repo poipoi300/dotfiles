@@ -1,3 +1,4 @@
-# The root disk is small; sccache evicts least-recently-used entries past this size.
+# ~/.cache/sccache is linked to the Windows partition (the root disk is small);
+# sccache evicts least-recently-used entries past this size.
 [cache.disk]
-size = 10737418240
+size = 64424509440
