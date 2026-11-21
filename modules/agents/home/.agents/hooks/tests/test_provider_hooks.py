@@ -28,6 +28,22 @@ DENY = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecisio
                                "permissionDecisionReason": "fixture reason"}}
 
 
+def _seed_rates(home: Path) -> None:
+    rates = home / ".t3/userdata/usage-model-rates.json"
+    rates.parent.mkdir(parents=True, exist_ok=True)
+    rates.write_text(json.dumps({"document": {
+        "claude-fable-5-2": {"input_cost_per_token": 8e-6, "output_cost_per_token": 40e-6,
+                             "cache_read_input_token_cost": 2e-7, "cache_creation_input_token_cost": 10e-6,
+                             "max_input_tokens": 1_000_000},
+        "claude-haiku-5-5": {"input_cost_per_token": 1e-7, "output_cost_per_token": 5e-7,
+                             "cache_read_input_token_cost": 1e-8, "cache_creation_input_token_cost": 1.25e-7,
+                             "max_input_tokens": 1_000_000},
+        "gpt-6.2-astra": {"input_cost_per_token": 8e-6, "output_cost_per_token": 40e-6,
+                          "cache_read_input_token_cost": 4e-7, "cache_creation_input_token_cost": 10e-6,
+                          "max_input_tokens": 258_400},
+    }}), encoding="utf-8")
+
+
 def grok(tool: str, tool_input: dict, event: str = "PreToolUse", **extra) -> dict:
     snake = {"PreToolUse": "pre_tool_use", "PostToolUse": "post_tool_use"}[event]
     return {"hookEventName": snake, "hook_event_name": event, "sessionId": "s", "session_id": "s",
@@ -68,18 +84,26 @@ class GrokTests(unittest.TestCase):
                                                             "tool_input": {"command": "x"}}), {})
         guard.assert_not_called()
 
-    def test_fable_delegates_are_denied_through_use_tool_nesting(self):
+    def test_ultra_delegates_require_opt_in_through_use_tool_nesting(self):
         # Grok calls a deferred MCP tool with its arguments nested one level down.
-        nested = {"tool_name": "t3-code__delegate_task",
-                  "tool_input": {"task": "x", "target": {"providerInstanceId": "claudeAgent", "model": "claude-fable-5-2"}}}
-        output = native.dispatch("grok", grok("t3-code__delegate_task", nested))
-        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertEqual(output["hookSpecificOutput"]["permissionDecisionReason"], model_guard.REASON)
-        output = native.dispatch("grok", grok("spawn_subagent", {"prompt": "x", "model": "fable"}))
-        self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
-        allowed = {**nested, "tool_input": {"task": "x", "target": {"model": "claude-haiku-5-5"}}}
-        output = native.dispatch("grok", grok("t3-code__delegate_task", allowed))
-        self.assertNotIn("permissionDecision", output.get("hookSpecificOutput", {}))
+        with tempfile.TemporaryDirectory(prefix="grok-rates-") as td:
+            home = Path(td)
+            _seed_rates(home)
+            nested = {"tool_name": "t3-code__delegate_task",
+                      "tool_input": {"task": "x", "target": {"providerInstanceId": "claudeAgent", "model": "claude-fable-5-2"}}}
+            with patch.object(Path, "home", return_value=home), patch.object(model_guard, "routing", None):
+                output = native.dispatch("grok", grok("t3-code__delegate_task", nested))
+                self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertIn("[ultra:", output["hookSpecificOutput"]["permissionDecisionReason"])
+                output = native.dispatch("grok", grok("spawn_subagent", {"prompt": "x", "model": "fable"}))
+                self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+                opted_in = {**nested, "tool_input": {"task": "[ultra: critical] x",
+                                                     "target": {"providerInstanceId": "claudeAgent", "model": "claude-fable-5-2"}}}
+                output = native.dispatch("grok", grok("t3-code__delegate_task", opted_in))
+                self.assertNotIn("permissionDecision", output.get("hookSpecificOutput", {}))
+                allowed = {**nested, "tool_input": {"task": "x", "target": {"model": "claude-haiku-5-5"}}}
+                output = native.dispatch("grok", grok("t3-code__delegate_task", allowed))
+                self.assertNotIn("permissionDecision", output.get("hookSpecificOutput", {}))
 
     @needs_rtk
     def test_rtk_rewrite_keeps_grok_arguments(self):
@@ -97,9 +121,14 @@ class GrokTests(unittest.TestCase):
         del unknown["toolInputTruncated"]
         with patch.object(native.vcs_guard, "guard", return_value=None):
             self.assertNotIn("permissionDecision", native.dispatch("grok", unknown).get("hookSpecificOutput", {}))
-        nested = {"tool_name": "t3-code__delegate_task", "tool_input": {"task": "x" * 5000, "target": {"model": "fable"}}}
-        denied = native.dispatch("grok", {**grok("t3-code__delegate_task", nested), "toolInputTruncated": True})
-        self.assertEqual(denied["hookSpecificOutput"]["permissionDecisionReason"], model_guard.REASON)
+        with tempfile.TemporaryDirectory(prefix="grok-trunc-") as td:
+            home = Path(td)
+            _seed_rates(home)
+            nested = {"tool_name": "t3-code__delegate_task", "tool_input": {"task": "x" * 5000, "target": {"model": "fable"}}}
+            with patch.object(Path, "home", return_value=home), patch.object(model_guard, "routing", None):
+                denied = native.dispatch("grok", {**grok("t3-code__delegate_task", nested), "toolInputTruncated": True})
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("[ultra:", denied["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_route_reminder_after_a_shell_call(self):
         payload = grok("run_terminal_command", {"command": "gh pr create"}, "PostToolUse", tool_response="url")
@@ -118,8 +147,10 @@ class GrokTests(unittest.TestCase):
                  patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("WPO_SESSION", None)
                 # Denied call must NOT consume the one-shot usage marker.
+                _seed_rates(root)
                 denied_call = grok("spawn_subagent", {"prompt": "x", "model": "fable"}, session_id="s-1")
-                denied = native.dispatch("grok", denied_call)
+                with patch.object(Path, "home", return_value=root), patch.object(model_guard, "routing", None):
+                    denied = native.dispatch("grok", denied_call)
                 self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
                 startup.assert_not_called()
 
@@ -177,9 +208,29 @@ class AntigravityTests(unittest.TestCase):
         with patch.object(native.vcs_guard, "guard", return_value=None) as guard:
             native.dispatch("antigravity", antigravity("run_command", {"CommandLine": "git push", "Cwd": "/srv/repo"}))
         self.assertEqual(guard.call_args.args[0]["cwd"], "/srv/repo")
-        delegate = antigravity("mcp_t3-code_delegate_task", {"task": "x", "toolSummary": "s",
-                                                             "target": {"model": "claude-fable-5-2"}})
-        self.assertEqual(native.dispatch("antigravity", delegate), {"decision": "deny", "reason": model_guard.REASON})
+        with tempfile.TemporaryDirectory(prefix="agy-rates-") as td:
+            home = Path(td)
+            _seed_rates(home)
+            delegate = antigravity("mcp_t3-code_delegate_task", {"task": "x", "toolSummary": "s",
+                                                                 "target": {"model": "claude-fable-5-2"}})
+            with patch.object(Path, "home", return_value=home), patch.object(model_guard, "routing", None):
+                res = native.dispatch("antigravity", delegate)
+                self.assertEqual(res["decision"], "deny")
+                self.assertIn("[ultra:", res["reason"])
+                # Explicit [ultra: ...] opt-in is allowed.
+                opted = antigravity("mcp_t3-code_delegate_task", {"task": "[ultra: hard bug] x", "toolSummary": "s",
+                                                                  "target": {"model": "claude-fable-5-2"}})
+                self.assertEqual(native.dispatch("antigravity", opted), {})
+
+        # Antigravity 3p parent cannot inherit into invoke_subagent; Gemini parent or explicit flash is allowed.
+        sub_3p = {**antigravity("invoke_subagent", {"Model": "inherit", "Prompt": "x"}), "modelName": "claude-opus-5-5"}
+        res_3p = native.dispatch("antigravity", sub_3p)
+        self.assertEqual(res_3p["decision"], "deny")
+        self.assertIn("3p", res_3p["reason"])
+        sub_3p_explicit = {**antigravity("invoke_subagent", {"Model": "flash", "Prompt": "x"}), "modelName": "claude-opus-5-5"}
+        self.assertEqual(native.dispatch("antigravity", sub_3p_explicit), {})
+        sub_gem = antigravity("invoke_subagent", {"Model": "inherit", "Prompt": "x"})
+        self.assertEqual(native.dispatch("antigravity", sub_gem), {})
 
     def test_no_opinion_prints_nothing_because_an_empty_object_denies(self):
         result = self.run_cli(json.dumps(antigravity("run_command", {"CommandLine": "echo hi"})))
@@ -353,7 +404,10 @@ class RegistrationTests(unittest.TestCase):
         config = json.loads(path.read_text())
         self.assertEqual(config["lint"], other["lint"])
         entry = config[register.ANTIGRAVITY_HOOK]
-        self.assertEqual([group["matcher"] for group in entry["PreToolUse"]], ["run_command", "mcp_t3-code_delegate_task"])
+        self.assertEqual([group["matcher"] for group in entry["PreToolUse"]], [
+            "run_command", "invoke_subagent", "mcp_t3-code_delegate_task",
+            "mcp_t3-code_t3_thread_launch", "mcp_t3-code_create_threads",
+        ])
         self.assertTrue(entry["SessionStart"][0]["command"].endswith(" antigravity || true"))
         self.assertEqual(register.synchronize(self.home), [])
 

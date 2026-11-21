@@ -33,22 +33,112 @@ def usage(**kwargs):
 
 
 class ModelGuardTests(unittest.TestCase):
-    def decide(self, tool, tool_input):
-        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input}
-        return native.dispatch("claude", payload).get("hookSpecificOutput", {})
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="model-guard-")
+        self.home = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        rates_path = self.home / ".t3/userdata/usage-model-rates.json"
+        rates_path.parent.mkdir(parents=True)
+        rates_path.write_text(json.dumps({"document": {
+            "claude-fable-5-2": {"input_cost_per_token": 8e-6, "output_cost_per_token": 40e-6,
+                                 "cache_read_input_token_cost": 2e-7, "cache_creation_input_token_cost": 10e-6,
+                                 "max_input_tokens": 1_000_000},
+            "claude-opus-5-5": {"input_cost_per_token": 4e-6, "output_cost_per_token": 20e-6,
+                                "cache_read_input_token_cost": 2e-7, "cache_creation_input_token_cost": 5e-6,
+                                "max_input_tokens": 1_000_000},
+            "gpt-6.2-sol": {"input_cost_per_token": 2e-6, "output_cost_per_token": 10e-6,
+                            "cache_read_input_token_cost": 1e-7, "cache_creation_input_token_cost": 2.5e-6,
+                            "max_input_tokens": 475_000},
+            "gpt-6.2-astra": {"input_cost_per_token": 8e-6, "output_cost_per_token": 40e-6,
+                              "cache_read_input_token_cost": 4e-7, "cache_creation_input_token_cost": 10e-6,
+                              "max_input_tokens": 258_400},
+        }}), encoding="utf-8")
 
-    def test_fable_subagents_and_delegates_are_denied_with_the_reason(self):
-        for tool, tool_input in (("Agent", {"prompt": "x", "model": "fable"}),
-                                 ("spawn_agent", {"model": "claude-fable-5-2"}),
-                                 ("mcp__t3-code__delegate_task", {"target": {"provider": "claude",
-                                                                            "model": "claude-fable-5-2"}})):
+    def decide(self, tool, tool_input, **extra):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, **extra}
+        with patch.object(Path, "home", return_value=self.home), patch.object(model_guard, "routing", None):
+            return native.dispatch("claude", payload).get("hookSpecificOutput", {})
+
+    def test_ultra_tier_delegates_and_launches_require_opt_in_without_blanket_ban(self):
+        for tool, tool_input in (
+            ("Agent", {"prompt": "x", "subagent_type": "reviewer", "model": "fable"}),
+            ("Agent", {"prompt": "x", "subagent_type": "reviewer", "model": "Claude-Fable-5-2"}),
+            ("spawn_agent", {"prompt": "x", "model": "GPT-6.2-Astra"}),
+            ("mcp__t3-code__delegate_task", {"task": "x", "target": {"provider": "claude", "model": "claude-fable-5-2"}}),
+            ("mcp__t3-code__t3_thread_launch", {"prompt": "x", "target": {"model": "gpt-6.2-astra"}}),
+            ("mcp__t3-code__create_threads", {"threads": [{"prompt": "x", "target": {"model": "gpt-6.2-astra"}}]}),
+        ):
             output = self.decide(tool, tool_input)
-            self.assertEqual(output["permissionDecision"], "deny")
-            self.assertEqual(output["permissionDecisionReason"], model_guard.REASON)
+            self.assertEqual(output["permissionDecision"], "deny", tool)
+            self.assertIn("[ultra:", output["permissionDecisionReason"])
 
-    def test_other_models_and_prompts_mentioning_fable_are_allowed(self):
-        self.assertEqual(self.decide("Agent", {"prompt": "compare fable and opus", "model": "opus"}), {})
-        self.assertEqual(self.decide("mcp__t3-code__delegate_task", {"target": {"model": "gpt-5"}}), {})
+        # Explicit [ultra: <reason>] opt-in is allowed (no permanent blanket block).
+        allowed = self.decide("mcp__t3-code__delegate_task", {
+            "task": "[ultra: stuck concurrency deadlock] diagnose race",
+            "target": {"model": "claude-fable-5-2"},
+        })
+        self.assertNotIn("permissionDecision", allowed)
+
+    def test_standard_and_flagship_models_are_allowed(self):
+        self.assertEqual(self.decide("Agent", {"prompt": "compare fable and opus", "subagent_type": "Explore", "model": "opus"}), {})
+        self.assertEqual(self.decide("mcp__t3-code__delegate_task", {"task": "x", "target": {"model": "gpt-6.2-sol"}}), {})
+
+    def test_claude_native_fork_is_denied_above_150k_context_and_allowed_below(self):
+        transcript = self.home / "session.jsonl"
+        transcript.write_text(json.dumps({
+            "type": "assistant",
+            "message": {"usage": {"input_tokens": 500, "cache_read_input_tokens": 180_000, "cache_creation_input_tokens": 1000}},
+        }) + "\n", encoding="utf-8")
+        # Omitted subagent_type or explicit "fork" over 150k -> denied.
+        for inp in ({"prompt": "do work"}, {"prompt": "do work", "subagent_type": "fork"}):
+            out = self.decide("Agent", inp, transcript_path=str(transcript))
+            self.assertEqual(out["permissionDecision"], "deny")
+            self.assertIn("150k", out["permissionDecisionReason"])
+        # Explicit non-fork subagent_type over 150k -> allowed.
+        self.assertEqual(self.decide("Agent", {"prompt": "do work", "subagent_type": "Explore"},
+                                     transcript_path=str(transcript)), {})
+        # Large >128 KiB tool_result at transcript tail does not hide an earlier >150k assistant usage entry.
+        assistant_line = json.dumps({
+            "type": "assistant",
+            "message": {"usage": {"input_tokens": 500, "cache_read_input_tokens": 180_000, "cache_creation_input_tokens": 1000}},
+        })
+        huge_tail = json.dumps({"type": "user", "content": "x" * 200_000})
+        transcript.write_text(assistant_line + "\n" + huge_tail + "\n", encoding="utf-8")
+        out = self.decide("Agent", {"prompt": "do work"}, transcript_path=str(transcript))
+        self.assertEqual(out["permissionDecision"], "deny")
+        # Under 150k -> fork allowed.
+        transcript.write_text(json.dumps({
+            "type": "assistant",
+            "message": {"usage": {"input_tokens": 500, "cache_read_input_tokens": 80_000, "cache_creation_input_tokens": 0}},
+        }) + "\n", encoding="utf-8")
+        self.assertEqual(self.decide("Agent", {"prompt": "do work"}, transcript_path=str(transcript)), {})
+
+    def test_mid_session_budget_refreshes_on_stale_delegation_only(self):
+        startup = unittest.mock.Mock(return_value="[Budget fresh]")
+        with patch.object(native, "ROOT", self.home), \
+             patch.object(Path, "home", return_value=self.home), \
+             patch.object(model_guard, "routing", None), \
+             patch.object(behavior, "design_hook", return_value={}), \
+             usage(startup=startup):
+            # SessionStart records the fresh marker.
+            native.dispatch("claude", {"hook_event_name": "SessionStart", "session_id": "s1", "cwd": str(self.home)})
+            self.assertEqual(startup.call_count, 1)
+            # Immediate delegation sees fresh marker -> no redundant refresh.
+            out = native.dispatch("claude", {
+                "hook_event_name": "PreToolUse", "session_id": "s1", "cwd": str(self.home),
+                "tool_name": "mcp__t3-code__delegate_task", "tool_input": {"task": "x", "target": {"model": "gpt-6.2-sol"}},
+            })
+            self.assertEqual(out, {})
+            self.assertEqual(startup.call_count, 1)
+            # Backdate marker past refresh interval -> next delegation injects refreshed snapshot.
+            marker = native._session_budget_marker("claude", "s1")
+            marker.write_text(json.dumps({"at": 1.0}), encoding="utf-8")
+            out2 = native.dispatch("claude", {
+                "hook_event_name": "PreToolUse", "session_id": "s1", "cwd": str(self.home),
+                "tool_name": "mcp__t3-code__delegate_task", "tool_input": {"task": "x", "target": {"model": "gpt-6.2-sol"}},
+            })
+            self.assertEqual(out2["hookSpecificOutput"]["additionalContext"], "[Budget fresh]")
+            self.assertEqual(startup.call_count, 2)
 
 
 class NativeHookTests(unittest.TestCase):

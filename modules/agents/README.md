@@ -89,8 +89,9 @@ state, `config.json`, `projects/`, or `skills`).
 - Antigravity's `mcp_config.json` expands no environment references. A whole `${VAR}` in a
   stdio server's `env` is dropped (the server inherits it); any other reference is refused.
   Grok expands `${VAR}` in every field, so entries pass through as in Claude.
-- Hooks: both get the route guard and the Fable model guard on their shell and T3
-  `delegate_task` calls, and Grok also gets the RTK rewrite and the route reminder after a PR
+- Hooks: both get the route guard and the model guard (rate-derived ultra-tier opt-in, Antigravity
+  `3p` inheritance block, and Claude `>150k` transcript fork block) on their shell and delegation
+  calls, and Grok also gets the RTK rewrite and the route reminder after a PR
   opens. Grok cuts the long strings of a tool input over 128 KiB but runs the whole command, so
   a truncated shell call is denied with a reason asking for a shorter command. Antigravity gets
   the usage snapshot at `SessionStart`. Grok discards `additionalContext` on both `SessionStart`

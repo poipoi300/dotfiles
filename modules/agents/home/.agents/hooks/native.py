@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,11 +35,25 @@ except ImportError:
 
 
 # Native tool names under the Claude names the shared guards check.
-GROK_TOOLS = {"run_terminal_command": "Bash", "spawn_subagent": "Task",
-              "t3-code__delegate_task": "mcp__t3-code__delegate_task"}
-ANTIGRAVITY_TOOLS = {"run_command": "Bash", "mcp_t3-code_delegate_task": "mcp__t3-code__delegate_task"}
+GROK_TOOLS = {
+    "run_terminal_command": "Bash",
+    "spawn_subagent": "Task",
+    "t3-code__delegate_task": "mcp__t3-code__delegate_task",
+    "t3-code__t3_thread_launch": "mcp__t3-code__t3_thread_launch",
+    "t3-code__create_threads": "mcp__t3-code__create_threads",
+}
+ANTIGRAVITY_TOOLS = {
+    "run_command": "Bash",
+    "invoke_subagent": "invoke_subagent",
+    "mcp_t3-code_delegate_task": "mcp__t3-code__delegate_task",
+    "mcp_t3-code_t3_thread_launch": "mcp__t3-code__t3_thread_launch",
+    "mcp_t3-code_create_threads": "mcp__t3-code__create_threads",
+}
 GROK_TRUNCATED = ("This shell command is too large for the hook to read whole, so it was not run. "
                   "Write long content to a file with the edit tools first, then run a shorter command.")
+SESSION_BUDGET_REFRESH_SECONDS = 20 * 60
+SESSION_BUDGET_RETENTION_SECONDS = 7 * 86400
+SESSION_BUDGET_LOCK_STALE_SECONDS = 30
 
 
 def shell_directory(session: object, requested: object) -> object:
@@ -69,7 +84,7 @@ def canonical(provider: str, payload: dict) -> dict:
     arguments = call.get("args") if isinstance(call.get("args"), dict) else {}
     tool = ANTIGRAVITY_TOOLS.get(call.get("name"), call.get("name"))
     result = {"hook_event_name": payload.get("hookEventName"), "cwd": payload.get("cwd"),
-              "session_id": payload.get("conversationId")}
+              "session_id": payload.get("conversationId"), "model_name": payload.get("modelName")}
     if tool == "Bash":
         result.update(tool_name=tool, tool_input={"command": arguments.get("CommandLine")},
                       cwd=shell_directory(payload.get("cwd"), arguments.get("Cwd")))
@@ -154,6 +169,96 @@ def _grok_session_usage(payload: dict) -> str | None:
         lock.unlink(missing_ok=True)
 
 
+def _session_budget_marker(provider: str, session: str) -> Path:
+    directory = ROOT / "hooks" / "state" / "session-budget"
+    key = hashlib.sha256(f"{provider}:{session}".encode()).hexdigest()[:24]
+    return directory / f"{key}.json"
+
+
+def _record_session_budget_seen(provider: str, payload: dict, now: float | None = None) -> None:
+    session = payload.get("session_id") or payload.get("sessionId")
+    if not isinstance(session, str) or not session:
+        return
+    stamp = time.time() if now is None else now
+    marker = _session_budget_marker(provider, session)
+    temporary = None
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=marker.parent, prefix=marker.name, suffix=".tmp")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps({"at": stamp}))
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, marker)
+        temporary = None
+        cutoff = stamp - SESSION_BUDGET_RETENTION_SECONDS
+        for entry in marker.parent.iterdir():
+            if entry != marker and entry.suffix in (".json", ".lock"):
+                try:
+                    if entry.stat().st_mtime < cutoff:
+                        entry.unlink(missing_ok=True)
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+
+
+def _session_budget_is_fresh(marker: Path, now: float) -> bool:
+    try:
+        recorded = json.loads(marker.read_text(encoding="utf-8")).get("at") if marker.is_file() else None
+    except (OSError, ValueError, AttributeError):
+        return False
+    return isinstance(recorded, (int, float)) and not isinstance(recorded, bool) and 0 <= now - recorded < SESSION_BUDGET_REFRESH_SECONDS
+
+
+def _mid_session_budget(provider: str, payload: dict) -> str | None:
+    """Re-inject a refreshed budget/routing snapshot on delegations when the session's copy is stale."""
+    if budget is None or os.environ.get("WPO_SESSION"):
+        return None
+    if payload.get("tool_name") not in model_guard.DELEGATION_TOOLS:
+        return None
+    session = payload.get("session_id") or payload.get("sessionId")
+    if not isinstance(session, str) or not session:
+        return None
+    now = time.time()
+    marker = _session_budget_marker(provider, session)
+    if _session_budget_is_fresh(marker, now):
+        return None
+    lock = marker.with_suffix(".lock")
+    descriptor = None
+    for attempt in range(2):
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                if attempt == 0 and time.time() - lock.stat().st_mtime > SESSION_BUDGET_LOCK_STALE_SECONDS:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            return None
+        except OSError:
+            return None
+    if descriptor is None:
+        return None
+    try:
+        os.close(descriptor)
+        if _session_budget_is_fresh(marker, time.time()):
+            return None
+        try:
+            context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
+            return None
+        _record_session_budget_seen(provider, payload, time.time())
+        return context
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def dispatch_grok(payload: dict) -> dict:
     """Route and model guards, RTK for the shell, one-shot usage context, and post-PR reminder."""
     shaped = canonical("grok", payload)
@@ -177,6 +282,10 @@ def dispatch_grok(payload: dict) -> dict:
         # Rewrite only an input Grok reports as whole.
         result = behavior.rewrite_shell(shaped) if payload.get("toolInputTruncated") is False else {}
         context = _grok_session_usage(payload)
+        if context:
+            _record_session_budget_seen("grok", payload)
+        else:
+            context = _mid_session_budget("grok", shaped)
         if context:
             specific = result.setdefault("hookSpecificOutput", {"hookEventName": "PreToolUse"})
             specific["additionalContext"] = "\n".join(filter(None, [specific.get("additionalContext"), context]))
@@ -231,7 +340,12 @@ def dispatch(provider: str, payload: dict) -> dict:
             denied = None
         if denied:
             return denied
-        return behavior.rewrite_shell(payload) if provider == "codex" else {}
+        result = behavior.rewrite_shell(payload) if provider == "codex" else {}
+        context = _mid_session_budget(provider, payload)
+        if context:
+            specific = result.setdefault("hookSpecificOutput", {"hookEventName": "PreToolUse"})
+            specific["additionalContext"] = "\n".join(filter(None, [specific.get("additionalContext"), context]))
+        return result
     if event not in ("SessionStart", "PostToolUse", "Stop"):
         return {}
     if event == "PostToolUse" and payload.get("tool_name") == "Bash":
@@ -249,6 +363,7 @@ def dispatch(provider: str, payload: dict) -> dict:
     if event == "SessionStart" and budget is not None and not os.environ.get("WPO_SESSION"):
         try:
             context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+            _record_session_budget_seen(provider, payload)
         except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
             context = ("Usage is UNKNOWN; native snapshot unavailable. Manual refresh: "
                        "python3 -I -B ~/.agents/usage/budget.py --refresh")

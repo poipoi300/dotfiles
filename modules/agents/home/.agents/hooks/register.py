@@ -78,8 +78,11 @@ def handlers(home: Path, provider: str) -> dict:
     if provider == "antigravity":
         # Exact tool names, one group each.
         handler = {"type": "command", "command": command, "timeout": 10}
-        return {"PreToolUse": [{"matcher": "run_command", "hooks": [handler]},
-                               {"matcher": "mcp_t3-code_delegate_task", "hooks": [dict(handler)]}],
+        return {"PreToolUse": [{"matcher": tool, "hooks": [dict(handler)]}
+                               for tool in ("run_command", "invoke_subagent",
+                                            "mcp_t3-code_delegate_task",
+                                            "mcp_t3-code_t3_thread_launch",
+                                            "mcp_t3-code_create_threads")],
                 "SessionStart": [{**handler, "timeout": 20}]}
     result = {}
     for event, matcher, timeout in (
@@ -96,7 +99,7 @@ def handlers(home: Path, provider: str) -> dict:
     result["PreToolUse"] = [{"matcher": "^Bash$", "hooks": [
         {"type": "command", "command": command, "timeout": 5},
     ]}, {"matcher": model_guard.MATCHER, "hooks": [
-        {"type": "command", "command": command, "timeout": 5},
+        {"type": "command", "command": command, "timeout": 20},
     ]}]
     return result
 

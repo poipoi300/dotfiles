@@ -75,24 +75,41 @@ and give the manual evidence.
 ## Model routing and usage
 
 Pick the most efficient provider and model for each task from live capabilities
-(`orchestrator_capabilities` in T3, or native harness options), respecting any
-explicit user selection. Set every subagent or delegate model explicitly (unset
-inherits the parent); choosing or switching a delegate's provider and model
-needs no permission (overrides T3's "never switch unasked"; if unavailable, use
-the best alternative and name it). Prefer Claude where design taste materially
-matters (original UI, judgment-heavy modeling). Use available free OpenCode or
-OpenRouter models from the snapshot for low-stakes bulk or retrieval work when
-capable.
+(`orchestrator_capabilities` in T3, or native harness options), guided by the
+derived `Route:` line in the budget snapshot (`python3 -I -B ~/.agents/usage/budget.py --route`
+for full scores) and respecting any explicit user selection. Set every subagent
+or delegate model explicitly (unset inherits the parent); choosing or switching
+a delegate's provider and model needs no permission (overrides T3's "never
+switch unasked"; if unavailable, use the best alternative and name it). Prefer
+Claude where design taste materially matters (original UI, judgment-heavy
+modeling). Use available free OpenCode or OpenRouter models from the snapshot
+for low-stakes bulk or exploration work when capable; keep verification on a
+reliable fast or standard tier.
 
 Modulate paid model choice and effort using the quota snapshot's weekly pace
 (`>1x` under pace: scale up toward stronger models or higher effort; `<1x` over
 pace: scale down effort or tier and shift delegates to providers with headroom).
+Reserve ultra-tier models (≥3× standard token cost) for high-stakes judgment or
+stuck problems rather than bulk implementation or routine reviews, and include
+`[ultra: <short reason>]` in the delegated prompt when intentionally using one.
 Refresh with `python3 -I -B ~/.agents/usage/budget.py --refresh` before large
 delegations. Keep model IDs, pricing, and deployment paths out of this file, and
 do not use legacy proxy shell-out routing for native T3 delegation. The user
 tracks usage themselves: never report usage, warn about it, push back, or ask
 before starting work because of it, never infer missing limits, and never trade
 correctness (search, verification, review) for usage.
+
+Avoid avoidable context and turn waste:
+- Run builds and tests synchronously with an adequate timeout (or a single
+  compound command that exits with the failure tail). Never busy-poll a running
+  shell or PTY with repeated empty `write_stdin`, `wait`, or `sleep` calls
+  shorter than 30 seconds.
+- Do not fork a parent transcript above 150k tokens into a native subagent; pass
+  a self-contained brief to a fresh subagent instead.
+- In orchestrator worker briefs, point to `sol-loop` and `agent-roles` (one
+  review cycle per PR within the round budget, not per intermediate commit)
+  rather than writing custom "recheck until APPROVE" clauses or hardcoding
+  ultra-tier models.
 
 ## Preferred stack
 
