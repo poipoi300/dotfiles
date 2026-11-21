@@ -9,7 +9,7 @@ Before reading the code in detail, write your own review checklist for this scop
 Then work through it: read for the failures your checklist names, and verify each suspicion empirically with cheap Polars/torch checks — recompute a headline metric from raw outputs, score a trivial baseline, check split integrity, overfit a single batch when a training loop is under review.
 
 Execution rules:
-- Run Python with `uv run --frozen python` (or `uv run --no-sync python`) so uv never relocks or syncs — plain `uv run` can rewrite `uv.lock` / `.venv` and fails outright in projects that cannot be relocked.
+- Run Python with `uv run --no-sync python`, which changes neither `uv.lock` nor an existing `.venv` (without one it creates an empty `.venv`); plain `uv run` can rewrite both and fails outright in projects that cannot be relocked. When the environment must be installed first, `uv run --frozen python` leaves `uv.lock` alone but installs into `.venv`.
 - Hard limit: no command expected to take more than about a minute, and no training runs beyond a single-batch overfit. For anything bigger, put the exact command in the report as a suggested check instead of running it.
 - Run torch on CPU unless the task explicitly says to use the GPU; the GPU may be busy with other workloads and an OOM there disrupts them.
 - On large datasets use Polars lazy scans and sampling rather than loading everything eagerly.
