@@ -2,8 +2,8 @@ description = "Shared AI-agent tooling: ~/.agents (skills, roles, hooks, MCP syn
 category    = "ai"
 
 # Every provider reads the one shared instruction file through a link in its global rules path
-# (Antigravity: ~/.gemini/config/AGENTS.md; Grok: any *.md in ~/.grok/rules); settings stay local.
-links = { ".claude/CLAUDE.md" = ".agents/AGENTS.md", ".claude/RTK.md" = ".agents/RTK.md", ".codex/AGENTS.md" = ".agents/AGENTS.md", ".gemini/config/AGENTS.md" = ".agents/AGENTS.md", ".grok/rules/AGENTS.md" = ".agents/AGENTS.md" }
+# (Antigravity: ~/.gemini/config/AGENTS.md; Grok: any *.md in ~/.grok/rules; OpenCode: ~/.config/opencode/AGENTS.md); settings stay local.
+links = { ".claude/CLAUDE.md" = ".agents/AGENTS.md", ".claude/RTK.md" = ".agents/RTK.md", ".codex/AGENTS.md" = ".agents/AGENTS.md", ".gemini/config/AGENTS.md" = ".agents/AGENTS.md", ".grok/rules/AGENTS.md" = ".agents/AGENTS.md", ".config/opencode/AGENTS.md" = ".agents/AGENTS.md" }
 
 [packages]
 # python: sync.py, hooks and tests (3.11+); python-yaml: the test suite only; python-tomlkit:

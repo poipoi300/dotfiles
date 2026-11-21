@@ -553,6 +553,78 @@ class LaunchTests(unittest.TestCase):
             self.assertIn(f'"$HOME/.agents/launch.py" {provider} "$@"', text)
             self.assertTrue(os.access(AGENTS / "bin" / wrapper, os.X_OK))
 
+    def test_antigravity_gemini_dir_parses_both_flag_spellings(self):
+        self.assertEqual(self.launch.antigravity_gemini_dir(["acp", "--gemini-dir", "/tmp/p"]), Path("/tmp/p"))
+        self.assertEqual(self.launch.antigravity_gemini_dir(["acp", "--gemini_dir=/tmp/q"]), Path("/tmp/q"))
+        self.assertIsNone(self.launch.antigravity_gemini_dir(["acp", "--app-data-dir", "antigravity-acp"]))
+        self.assertIsNone(self.launch.antigravity_gemini_dir(["acp", "--gemini-dir"]))
+
+    def test_link_antigravity_profile_links_shared_config_without_clobbering_real_files(self):
+        src = self.home / ".gemini/config"
+        (src / "agents").mkdir(parents=True)
+        (src / "agents/reviewer.md").write_text("# reviewer\n")
+        (src / "AGENTS.md").write_text("# rules\n")
+        (src / "hooks.json").write_text('{"agents-common": {}}')
+        (src / "mcp_config.json").write_text('{"mcpServers": {"a": {"command": "x"}}}')
+
+        profile = self.home / "t3-profile"
+        (profile / "config/agents").mkdir(parents=True)  # empty placeholder dir
+        (profile / "config/mcp_config.json").write_text("")  # 0-byte placeholder
+        (profile / "config/config.json").write_text('{"keep": true}')
+
+        self.launch.link_antigravity_profile(self.home, profile)
+        for name in ("AGENTS.md", "hooks.json", "mcp_config.json", "agents"):
+            dest = profile / "config" / name
+            self.assertTrue(dest.is_symlink(), name)
+            self.assertEqual(os.path.realpath(dest), os.path.realpath(src / name))
+        self.assertEqual((profile / "config/config.json").read_text(), '{"keep": true}')
+
+        # Idempotent on repeat calls, and skips when profile IS ~/.gemini.
+        self.launch.link_antigravity_profile(self.home, profile)
+        self.launch.link_antigravity_profile(self.home, self.home / ".gemini")
+
+        # Unmanaged non-empty files and foreign symlinks are preserved with a warning.
+        other_profile = self.home / "other-profile"
+        (other_profile / "config").mkdir(parents=True)
+        (other_profile / "config/mcp_config.json").write_text('{"mcpServers": {"custom": {"command": "y"}}}')
+        foreign = self.home / "foreign-hooks.json"
+        foreign.write_text("{}")
+        (other_profile / "config/hooks.json").symlink_to(foreign)
+        with mock.patch("sys.stderr", new_callable=StringIO) as stderr:
+            self.launch.link_antigravity_profile(self.home, other_profile)
+        self.assertFalse((other_profile / "config/mcp_config.json").is_symlink())
+        self.assertEqual(os.path.realpath(other_profile / "config/hooks.json"), os.path.realpath(foreign))
+        self.assertTrue((other_profile / "config/AGENTS.md").is_symlink())
+        self.assertIn("keeping unmanaged", stderr.getvalue())
+        self.assertIn("keeping existing", stderr.getvalue())
+        # Repeating the same launch does not spam stderr again for unchanged foreign files.
+        with mock.patch("sys.stderr", new_callable=StringIO) as stderr_again:
+            self.launch.link_antigravity_profile(self.home, other_profile)
+        self.assertEqual(stderr_again.getvalue(), "")
+
+        # Corrupt notice state degrades gracefully instead of aborting agy launch.
+        notices_file = self.home / ".agents/state/antigravity-profile-notices.json"
+        notices_file.write_text('{"trunc', encoding="utf-8")
+        with mock.patch("sys.stderr", new_callable=StringIO) as stderr_corrupt:
+            self.launch.link_antigravity_profile(self.home, other_profile)
+        self.assertIn("keeping unmanaged", stderr_corrupt.getvalue())
+        self.assertIsInstance(json.loads(notices_file.read_text(encoding="utf-8")), dict)
+
+    def test_agy_launch_links_gemini_dir_before_exec(self):
+        (self.home / ".agents/machine.json").write_text(json.dumps({"providers": {"agy": sys.executable}}))
+        (self.home / ".gemini/config").mkdir(parents=True)
+        (self.home / ".gemini/config/hooks.json").write_text('{"agents-common": {}}')
+        profile = self.home / "t3-agy-profile"
+        with mock.patch.object(self.launch.Path, "home", return_value=self.home), \
+             mock.patch.object(self.launch, "apply", return_value=[]), \
+             mock.patch.object(self.launch, "sync_generated_adapters", return_value={}), \
+             mock.patch.object(self.launch.os, "execv") as execv, \
+             mock.patch("sys.stdout", new_callable=StringIO) as stdout:
+            self.launch.main(["agy", "acp", "--gemini-dir", str(profile)])
+        self.assertEqual(stdout.getvalue(), "")
+        execv.assert_called_once()
+        self.assertTrue((profile / "config/hooks.json").is_symlink())
+
 
 if __name__ == "__main__":
     unittest.main()

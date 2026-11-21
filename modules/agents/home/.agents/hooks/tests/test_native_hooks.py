@@ -249,13 +249,20 @@ class RegistrationTests(unittest.TestCase):
         for provider in ("claude", "codex"):
             handlers = register.handlers(Path.home(), provider)
             commands = {h["command"] for groups in handlers.values() for g in groups for h in g["hooks"]}
-            self.assertEqual(commands, {f'python3 -I -B "$HOME/.agents/hooks/native.py" {provider}'})
+            self.assertEqual(commands, {f'python3 -I -B "$HOME/.agents/hooks/native.py" {provider} || true'})
         for provider in ("claude", "codex"):
             pre_tool = register.handlers(Path.home(), provider)["PreToolUse"][0]
             self.assertEqual(pre_tool["matcher"], "^Bash$")
             self.assertEqual(pre_tool["hooks"][0]["timeout"], 5)
             self.assertEqual(register.handlers(Path.home(), provider)["PreToolUse"][1]["matcher"],
                              model_guard.MATCHER)
+
+    def test_missing_hook_script_passes_through_for_claude_and_codex(self):
+        for provider in ("claude", "codex"):
+            command = register.handlers(Path.home(), provider)["PreToolUse"][0]["hooks"][0]["command"]
+            result = subprocess.run(["sh", "-c", command], check=False, input="{}", capture_output=True, text=True,
+                                    timeout=10, env={**os.environ, "HOME": str(self.home)})
+            self.assertEqual((result.returncode, result.stdout), (0, ""), provider)
 
     def test_hand_merged_home_relative_registration_is_recognised_as_owned(self):
         home = self.home

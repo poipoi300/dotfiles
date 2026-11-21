@@ -9,10 +9,12 @@ nothing, so the Antigravity adapter prints nothing unless it has a decision or c
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # abspath, not resolve(): arcus links the files into $HOME, and ROOT must be ~/.agents
@@ -82,8 +84,78 @@ def from_grok(payload: dict) -> bool:
     return bool(os.environ.get("GROK_HOOK_EVENT")) or ("hookEventName" in payload and "hook_event_name" in payload)
 
 
+GROK_USAGE_RETENTION_SECONDS = 7 * 86400
+GROK_USAGE_LOCK_STALE_SECONDS = 30
+
+
+def _grok_session_usage(payload: dict) -> str | None:
+    """Inject the usage snapshot once per main Grok session on its first allowed PreToolUse.
+
+    Grok discards additionalContext on SessionStart and UserPromptSubmit, and drops it on a
+    PreToolUse deny; callers must invoke this only after every deny guard has passed.
+    """
+    if budget is None or os.environ.get("WPO_SESSION") or payload.get("subagentType"):
+        return None
+    session = payload.get("session_id") or payload.get("sessionId")
+    if not isinstance(session, str) or not session:
+        return None
+    directory = ROOT / "hooks" / "state" / "grok-usage"
+    key = hashlib.sha256(f"grok:{session}".encode()).hexdigest()[:24]
+    marker = directory / f"{key}.json"
+    if marker.exists():
+        return None
+    lock = directory / f"{key}.lock"
+    descriptor = None
+    for attempt in range(2):
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                if attempt == 0 and time.time() - lock.stat().st_mtime > GROK_USAGE_LOCK_STALE_SECONDS:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            return None
+        except OSError:
+            return None
+    if descriptor is None:
+        return None
+    try:
+        os.close(descriptor)
+        if marker.exists():
+            return None
+        try:
+            context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
+            context = ("Usage is UNKNOWN; native snapshot unavailable. Manual refresh: "
+                       "python3 -I -B ~/.agents/usage/budget.py --refresh")
+        # Write the session marker only after startup() finishes so a hook killed by timeout
+        # retries on a later tool call instead of losing the snapshot for the whole session.
+        try:
+            now = time.time()
+            marker_fd = os.open(marker, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+            with os.fdopen(marker_fd, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps({"at": now}))
+            cutoff = now - GROK_USAGE_RETENTION_SECONDS
+            for entry in directory.iterdir():
+                if entry not in (marker, lock) and entry.suffix in (".json", ".lock"):
+                    try:
+                        if entry.stat().st_mtime < cutoff:
+                            entry.unlink(missing_ok=True)
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        return context
+    finally:
+        lock.unlink(missing_ok=True)
+
+
 def dispatch_grok(payload: dict) -> dict:
-    """Route and model guards, RTK for the shell, and the route reminder after a PR opens."""
+    """Route and model guards, RTK for the shell, one-shot usage context, and post-PR reminder."""
     shaped = canonical("grok", payload)
     event = shaped.get("hook_event_name")
     if event == "PreToolUse":
@@ -103,7 +175,12 @@ def dispatch_grok(payload: dict) -> dict:
         if denied:
             return denied
         # Rewrite only an input Grok reports as whole.
-        return behavior.rewrite_shell(shaped) if payload.get("toolInputTruncated") is False else {}
+        result = behavior.rewrite_shell(shaped) if payload.get("toolInputTruncated") is False else {}
+        context = _grok_session_usage(payload)
+        if context:
+            specific = result.setdefault("hookSpecificOutput", {"hookEventName": "PreToolUse"})
+            specific["additionalContext"] = "\n".join(filter(None, [specific.get("additionalContext"), context]))
+        return result
     if event == "PostToolUse" and shaped.get("tool_name") == "Bash":
         return vcs_guard.remind(shaped) or {}
     return {}

@@ -1,7 +1,7 @@
 # Shared agent instructions
 
 These are personal rules shared by T3 Code, Codex, Claude Code, Antigravity,
-Grok, and Zed.
+Grok, OpenCode, and Zed.
 Repository instructions add project contracts, ownership boundaries, checks, and
 version-control rules.
 
@@ -72,27 +72,27 @@ and give the manual evidence.
   from the time per unit of work and the cost of a save. When running an
   existing tool that would lose more, say so before starting it.
 
-## Models and usage
+## Model routing and usage
 
-Aim for the most efficient mix of intelligence and cost for the task, respecting
-any explicit user selection. Prefer Claude where design taste materially matters,
-including original UI and judgment-heavy modeling. Choosing or switching a
-delegate's provider and model needs no permission; this overrides T3's "never
-switch unasked". If a model is unavailable, use the best available alternative
-and say which one you used. Keep model IDs, pricing snapshots, and deployment
-paths in configuration, not in this file. Do not use legacy proxy shell-out
-routing for native T3 delegation.
+Pick the most efficient provider and model for each task from live capabilities
+(`orchestrator_capabilities` in T3, or native harness options), respecting any
+explicit user selection. Set every subagent or delegate model explicitly (unset
+inherits the parent); choosing or switching a delegate's provider and model
+needs no permission (overrides T3's "never switch unasked"; if unavailable, use
+the best alternative and name it). Prefer Claude where design taste materially
+matters (original UI, judgment-heavy modeling). Use available free OpenCode or
+OpenRouter models from the snapshot for low-stakes bulk or retrieval work when
+capable.
 
-Set every subagent's model explicitly, picked per task from the model table in
-context; unset, it inherits the parent's.
-
-Use the usage snapshot to choose the model mix: when one provider is nearly
-spent, shift delegates to the providers with headroom. The SessionStart hook
-supplies a snapshot; refresh it with
-`python3 -I -B ~/.agents/usage/budget.py --refresh` before delegating a large
-piece of work. The user tracks usage and sizes requests themselves, so don't
-report usage, warn about it, or ask before starting work because of it. Never
-trade correctness for usage: still search the web, verify, and review.
+Modulate paid model choice and effort using the quota snapshot's weekly pace
+(`>1x` under pace: scale up toward stronger models or higher effort; `<1x` over
+pace: scale down effort or tier and shift delegates to providers with headroom).
+Refresh with `python3 -I -B ~/.agents/usage/budget.py --refresh` before large
+delegations. Keep model IDs, pricing, and deployment paths out of this file, and
+do not use legacy proxy shell-out routing for native T3 delegation. The user
+tracks usage themselves: never report usage, warn about it, push back, or ask
+before starting work because of it, never infer missing limits, and never trade
+correctness (search, verification, review) for usage.
 
 ## Preferred stack
 

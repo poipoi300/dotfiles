@@ -51,18 +51,23 @@ and `grok` from the `ai` module. `ripgrep` and `git` are expected from the base 
    because T3 starts a binary path as the Antigravity CLI (`agy acp`) only when its file name is
    `agy` or `antigravity`.
 
-## Antigravity and Grok
+## Antigravity, Grok, and OpenCode
 
-Both CLIs are managed once their home folder exists (`~/.gemini`, `~/.grok`); the instruction
-links above create them. In T3 both run as ACP providers and read the same global files as in
-a terminal: T3 gives `agy` a private `GEMINI_HOME`, but the CLI still reads `~/.gemini/config`
-(checked with logging hooks in T3-started sessions).
+Both Antigravity and Grok are managed once their home folder exists (`~/.gemini`, `~/.grok`); the
+instruction links above create them. OpenCode gets `~/.config/opencode/AGENTS.md` (linked to the
+shared `AGENTS.md`) and `~/.config/opencode/plugins/agents-usage.js` (injects the cached usage
+snapshot into each OpenCode session via `experimental.chat.system.transform`).
+
+T3 Code launches `agy acp --gemini-dir <profile>` with a private profile where T3 links only
+`skills`; `bin/agy` (`launch.py`) links `~/.gemini/config/{AGENTS.md,hooks.json,mcp_config.json,agents}`
+into `<profile>/config/` on every start (replacing only empty placeholders and never touching auth
+state, `config.json`, `projects/`, or `skills`).
 
 | | Antigravity CLI | Grok Build |
 |---|---|---|
-| Instructions | `~/.gemini/config/AGENTS.md` (global rule) | `~/.grok/rules/AGENTS.md` (global rule) |
+| Instructions | `~/.gemini/config/AGENTS.md` (global rule, linked into T3 `--gemini-dir` profiles) | `~/.grok/rules/AGENTS.md` (global rule) |
 | Skills | links in `~/.gemini/config/skills/`, the folder T3 also links into its profile | scans `~/.agents/skills` itself |
-| MCP servers | owned entries in `~/.gemini/config/mcp_config.json` | owned `[mcp_servers.<name>]` tables in `~/.grok/config.toml` |
+| MCP servers | owned entries in `~/.gemini/config/mcp_config.json` (linked into T3 profiles) | owned `[mcp_servers.<name>]` tables in `~/.grok/config.toml` |
 | Roles | `~/.gemini/config/agents/*.md`: subagents, Claude tool grants mapped to native tools | `~/.grok/agents/*.md`, which win over the same names in `~/.claude/agents` |
 | Hooks | named entry `agents-common` in `~/.gemini/config/hooks.json` | whole file `~/.grok/hooks/agents.json` |
 
@@ -88,13 +93,15 @@ a terminal: T3 gives `agy` a private `GEMINI_HOME`, but the CLI still reads `~/.
   `delegate_task` calls, and Grok also gets the RTK rewrite and the route reminder after a PR
   opens. Grok cuts the long strings of a tool input over 128 KiB but runs the whole command, so
   a truncated shell call is denied with a reason asking for a shorter command. Antigravity gets
-  the usage snapshot at session start. Antigravity's PreToolUse has no
-  "no opinion" reply: `{}` or a non-zero exit denies the call and only an empty reply leaves it
-  to Antigravity, so the adapter prints nothing unless it denies, and the registered command
-  ends in `|| true`. RTK's own `rtk hook antigravity` answers `allow` to every call, which
-  would skip Antigravity's permission checks, so it is not registered. Grok reads only a
-  `systemMessage` at session start, so it gets no usage snapshot; neither gets the Impeccable
-  design feedback, whose engine reads Claude and Codex payloads.
+  the usage snapshot at `SessionStart`. Grok discards `additionalContext` on both `SessionStart`
+  and `UserPromptSubmit`, so Grok registers a `*` `PreToolUse` matcher that injects the usage
+  snapshot once per main session (after deny guards pass; skipped for subagents and `WPO_SESSION`).
+  All hook commands end in `|| true` so a transiently missing `native.py` during an `arcus apply`
+  relink passes through instead of blocking tool calls; `native.py` always denies via JSON with
+  exit 0. Antigravity's `PreToolUse` has no "no opinion" reply (`{}` or a non-zero exit denies),
+  so its adapter prints nothing unless it denies. RTK's own `rtk hook antigravity` answers `allow`
+  to every call, which would skip Antigravity's permission checks, so it is not registered.
+  Neither gets the Impeccable design feedback, whose engine reads Claude and Codex payloads.
 
 ## Notes
 

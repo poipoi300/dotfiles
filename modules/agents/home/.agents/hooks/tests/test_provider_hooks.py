@@ -78,7 +78,8 @@ class GrokTests(unittest.TestCase):
         output = native.dispatch("grok", grok("spawn_subagent", {"prompt": "x", "model": "fable"}))
         self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
         allowed = {**nested, "tool_input": {"task": "x", "target": {"model": "claude-haiku-5-5"}}}
-        self.assertEqual(native.dispatch("grok", grok("t3-code__delegate_task", allowed)), {})
+        output = native.dispatch("grok", grok("t3-code__delegate_task", allowed))
+        self.assertNotIn("permissionDecision", output.get("hookSpecificOutput", {}))
 
     @needs_rtk
     def test_rtk_rewrite_keeps_grok_arguments(self):
@@ -95,7 +96,7 @@ class GrokTests(unittest.TestCase):
         unknown = grok("run_terminal_command", {"command": "git status"})
         del unknown["toolInputTruncated"]
         with patch.object(native.vcs_guard, "guard", return_value=None):
-            self.assertEqual(native.dispatch("grok", unknown), {})
+            self.assertNotIn("permissionDecision", native.dispatch("grok", unknown).get("hookSpecificOutput", {}))
         nested = {"tool_name": "t3-code__delegate_task", "tool_input": {"task": "x" * 5000, "target": {"model": "fable"}}}
         denied = native.dispatch("grok", {**grok("t3-code__delegate_task", nested), "toolInputTruncated": True})
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecisionReason"], model_guard.REASON)
@@ -107,6 +108,59 @@ class GrokTests(unittest.TestCase):
             self.assertEqual(native.dispatch("grok", payload), context)
         self.assertEqual(remind.call_args.args[0]["tool_name"], "Bash")
         self.assertEqual(native.dispatch("grok", grok("read_file", {"path": "x"}, "PostToolUse")), {})
+
+    def test_grok_usage_injected_once_per_main_session_after_guards_pass(self):
+        with tempfile.TemporaryDirectory(prefix="grok-usage-") as td:
+            root = Path(td)
+            startup = unittest.mock.Mock(return_value="[Budget fixture]")
+            with patch.object(native, "ROOT", root), \
+                 patch.object(native, "budget", types.SimpleNamespace(startup=startup)), \
+                 patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("WPO_SESSION", None)
+                # Denied call must NOT consume the one-shot usage marker.
+                denied_call = grok("spawn_subagent", {"prompt": "x", "model": "fable"}, session_id="s-1")
+                denied = native.dispatch("grok", denied_call)
+                self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+                startup.assert_not_called()
+
+                # Subagents skip usage injection.
+                subagent = grok("read_file", {"path": "x"}, session_id="s-sub", subagentType="explore")
+                self.assertEqual(native.dispatch("grok", subagent), {})
+                startup.assert_not_called()
+
+                # First allowed call in main session injects usage; second call does not.
+                first = native.dispatch("grok", grok("read_file", {"path": "x"}, session_id="s-1"))
+                self.assertEqual(first["hookSpecificOutput"]["hookEventName"], "PreToolUse")
+                self.assertEqual(first["hookSpecificOutput"]["additionalContext"], "[Budget fixture]")
+                startup.assert_called_once()
+
+                second = native.dispatch("grok", grok("read_file", {"path": "y"}, session_id="s-1"))
+                self.assertEqual(second, {})
+                startup.assert_called_once()
+
+                # WPO sessions skip injection.
+                with patch.dict(os.environ, {"WPO_SESSION": "1"}):
+                    self.assertEqual(native.dispatch("grok", grok("read_file", {"path": "z"}, session_id="s-wpo")), {})
+                startup.assert_called_once()
+
+                # Interrupted startup (e.g. timeout kill) does not permanently consume the marker.
+                flaky = unittest.mock.Mock(side_effect=[KeyboardInterrupt("killed"), "[Budget recovered]"])
+                with patch.object(native, "budget", types.SimpleNamespace(startup=flaky)):
+                    with self.assertRaises(KeyboardInterrupt):
+                        native.dispatch("grok", grok("read_file", {"path": "a"}, session_id="s-retry"))
+                    recovered = native.dispatch("grok", grok("read_file", {"path": "b"}, session_id="s-retry"))
+                self.assertEqual(recovered["hookSpecificOutput"]["additionalContext"], "[Budget recovered]")
+                self.assertEqual(flaky.call_count, 2)
+
+    @needs_rtk
+    def test_grok_first_shell_call_combines_rtk_rewrite_and_usage_context(self):
+        with tempfile.TemporaryDirectory(prefix="grok-rtk-usage-") as td:
+            with patch.object(native, "ROOT", Path(td)), \
+                 patch.object(native, "budget", types.SimpleNamespace(startup=lambda cwd: "[Budget fixture]")):
+                out = native.dispatch("grok", grok("run_terminal_command", {"command": "git status"}, session_id="s-rtk"))
+            specific = out["hookSpecificOutput"]
+            self.assertEqual(specific["updatedInput"]["command"], "rtk git status")
+            self.assertEqual(specific["additionalContext"], "[Budget fixture]")
 
 
 class AntigravityTests(unittest.TestCase):
@@ -155,8 +209,9 @@ class RegistrationTests(unittest.TestCase):
         self.assertIn("grok", register.synchronize(self.home, apply=True))
         path = self.home / ".grok/hooks/agents.json"
         hooks = json.loads(path.read_text())["hooks"]
-        self.assertEqual([group["matcher"] for group in hooks["PreToolUse"]],
-                         [register.GROK_SHELL, register.GROK_DELEGATE])
+        self.assertEqual([group["matcher"] for group in hooks["PreToolUse"]], ["*"])
+        self.assertEqual(hooks["PreToolUse"][0]["hooks"][0]["timeout"], 20)
+        self.assertTrue(hooks["PreToolUse"][0]["hooks"][0]["command"].endswith(" grok || true"))
         self.assertEqual(hooks["PostToolUse"][0]["matcher"], register.GROK_SHELL)
         self.assertEqual(register.synchronize(self.home), [])
         path.write_text(json.dumps({"hooks": {}}))

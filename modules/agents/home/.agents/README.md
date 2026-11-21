@@ -128,8 +128,8 @@ On 2026-11-21 four pieces came from pstack (Lauren Tan, `cursor/plugins/pstack`,
 commit `d42aff08aa58`); `poteto-mode`, its playbooks, the other principles and the model sheet
 duplicate the skills above and were not adopted. `correct` and `bro` are skills, with
 the source in each `metadata.source` and the license beside it. `roles/adversary.md` adapts
-`interrogate`'s adversary brief (license in `roles/LICENSE-pstack`); `council` runs it as its
-adversarial mode, which replaces `interrogate`'s use of `arena`. `principle-attack-the-premise`
+`interrogate`'s adversary brief (license in `roles/LICENSE-pstack`); `council` runs it in the
+code council's attacking seats, which replaces `interrogate`'s use of `arena`. `principle-attack-the-premise`
 became step 5 of Phase 4 (Phase 4.5) in `systematic-debugging`, with the license beside it. Local changes: no imported skill uses
 `disable-model-invocation`, which Codex's skill validator rejects, so their descriptions limit
 when they trigger; `correct` also reads the user's recorded corrections (feedback memories,
@@ -159,6 +159,8 @@ python3 -I -B -m unittest discover -s ~/.agents/tests
 python3 -I -B -m unittest discover -s ~/.agents/hooks/tests
 python3 -I -B -m unittest discover -s ~/.agents/usage/tests   # private module only
 python3 ~/.agents/skills/humanizer/tests/test_checker.py
+uv run ~/.agents/skills/council/tests/test_garble.py
+python3 -I -B ~/.agents/skills/council/tests/test_witness.py
 ```
 
 Tests cover configuration preservation, translation, drift, collision refusal, backup and
@@ -226,17 +228,17 @@ The Impeccable design hook runs the engine from `$IMPECCABLE_BIN`, the binary be
 (`skills/impeccable/scripts/bin/linux-<arch>/impeccable`), or `impeccable` on PATH, which the
 `impeccable-engine` package provides. It never downloads anything.
 
-`usage/budget.py` (private module) reports only supported observed usage and explicit
-unknown/stale state; without it the hooks simply add no usage context and the Claude
-statusLine is not registered. SessionStart reads Claude's native `get_usage` control
-request and Codex's `account/rateLimits/read` through temporary stdio processes, with
-hooks/MCP disabled for the Claude probe and no model prompts. It needs no running
-Codex daemon or visible Claude status line. Hook reads cache for five minutes;
-`python3 -I -B ~/.agents/usage/budget.py --refresh` forces fresh provider reads and is
-also documented in AGENTS.md for hosts that do not deliver SessionStart context.
-The same snapshot includes Grok's subscription billing percentage and reset time using
-its existing default native login. That token goes only to Grok's fixed HTTPS billing
-endpoint, without redirects or token refreshes; custom Grok auth/endpoints report unknown.
-WPO's separate routing usage adapter
-(`~/.claude/hooks/usage_budget.py`) is a distinct integration: it reads the Claude Code and
-CLIProxyAPI OAuth token files and queries only api.anthropic.com and chatgpt.com.
+`usage/budget.py` (private module) reports observed quota usage formatted as remaining-budget
+pace (`remaining/time-left` vs even weekly pace: `>1x` under pace, `<1x` over pace) plus
+available free OpenCode Zen and OpenRouter tool-calling models. Without it the hooks add no
+usage context and the Claude `statusLine` is not registered. Probes read Claude's native
+`get_usage` control request and Codex's `account/rateLimits/read` via temporary stdio processes
+(hooks/MCP disabled, no model prompts), Grok's fixed HTTPS billing endpoint using its default
+native login (no redirects or token refreshes), Antigravity's `retrieveUserQuotaSummary` using
+the freshest native OAuth access token (refreshing via `agy models` or Google's token endpoint
+when expired, no redirects), OpenCode's local `opencode models --verbose`, and OpenRouter's
+public `/api/v1/models` (only when a local OpenRouter key is configured). Quota reads cache for
+five minutes and free-model catalogs for six hours; `--snapshot` uses those caches (for hooks
+and the OpenCode plugin), while `--refresh` forces fresh reads. WPO's separate routing usage
+adapter (`~/.claude/hooks/usage_budget.py`) is a distinct integration: it reads the Claude Code
+and CLIProxyAPI OAuth token files and queries only `api.anthropic.com` and `chatgpt.com`.

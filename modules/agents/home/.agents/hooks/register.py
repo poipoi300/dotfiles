@@ -21,7 +21,6 @@ from sync import provider_enabled
 # Antigravity's hooks.json is shared by named hooks; this is the one these scripts own.
 ANTIGRAVITY_HOOK = "agents-common"
 GROK_SHELL = "^run_terminal_command$"
-GROK_DELEGATE = "^(spawn_subagent|t3-code__delegate_task)$"
 
 
 def read_json(path: Path) -> dict:
@@ -67,17 +66,18 @@ def python_command(home: Path, script: str, argument: str) -> str:
 
 
 def handlers(home: Path, provider: str) -> dict:
-    command = python_command(home, "hooks/native.py", provider)
+    # All providers deny through JSON with exit 0; `|| true` keeps a transiently missing
+    # script (e.g. during an arcus relink) a pass-through instead of an exit-2 block.
+    command = f"{python_command(home, 'hooks/native.py', provider)} || true"
     if provider == "grok":
-        # Grok's own tool names; it fails open when a hook cannot run.
-        handler = {"type": "command", "command": command, "timeout": 5}
-        return {"PreToolUse": [{"matcher": GROK_SHELL, "hooks": [handler]},
-                               {"matcher": GROK_DELEGATE, "hooks": [dict(handler)]}],
-                "PostToolUse": [{"matcher": GROK_SHELL, "hooks": [dict(handler)]}]}
+        # Matcher `*` lets the first PreToolUse of a session inject the usage snapshot
+        # (Grok discards additionalContext on SessionStart and UserPromptSubmit) while
+        # still running the shell/delegate guards and RTK rewrite.
+        return {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 20}]}],
+                "PostToolUse": [{"matcher": GROK_SHELL, "hooks": [{"type": "command", "command": command, "timeout": 5}]}]}
     if provider == "antigravity":
-        # Antigravity denies the tool call when a hook exits non-zero (a missing script while arcus
-        # relinks, say); `|| true` keeps that a pass-through. Exact tool names, one group each.
-        handler = {"type": "command", "command": f"{command} || true", "timeout": 10}
+        # Exact tool names, one group each.
+        handler = {"type": "command", "command": command, "timeout": 10}
         return {"PreToolUse": [{"matcher": "run_command", "hooks": [handler]},
                                {"matcher": "mcp_t3-code_delegate_task", "hooks": [dict(handler)]}],
                 "SessionStart": [{**handler, "timeout": 20}]}
