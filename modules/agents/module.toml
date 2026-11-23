@@ -8,8 +8,9 @@ links = { ".claude/CLAUDE.md" = ".agents/AGENTS.md", ".claude/RTK.md" = ".agents
 [packages]
 # python: sync.py, hooks and tests (3.11+); python-yaml: the test suite only; python-tomlkit:
 # sync.py's edits to Grok's config.toml, which Grok itself rewrites.
-# nodejs/npm: `npx -y <pkg>` MCP servers; uv: `uvx` MCP servers.
-pacman = ["python", "python-yaml", "python-tomlkit", "nodejs", "npm", "uv"]
+# nodejs/npm: `npx -y <pkg>` MCP servers; uv: `uvx` MCP servers; graphviz: lays out the
+# statechart skill's charts.
+pacman = ["python", "python-yaml", "python-tomlkit", "nodejs", "npm", "uv", "graphviz"]
 # openai-codex-bin comes from the dev module; Claude Code is its native install (dev README);
 # agy (antigravity-cli) and grok (grok-build) come from the ai module.
 # tla-tools: TLC (tla2tools.jar 1.7.4, the version the statechart skill pins) for that skill.

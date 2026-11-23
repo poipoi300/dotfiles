@@ -20,7 +20,8 @@ budget scripts, and personal skills. The private `agents-private` module adds th
 ## Packages
 
 pacman: `python` (3.11+), `python-yaml` (tests), `python-tomlkit` (edits to Grok's
-`config.toml`), `nodejs`, `npm` (`npx` MCP servers), `uv` (`uvx` MCP servers). AUR:
+`config.toml`), `nodejs`, `npm` (`npx` MCP servers), `uv` (`uvx` MCP servers), `graphviz`
+(the `statechart` skill's chart layout). AUR:
 `tla-tools` (TLC for the `statechart` skill). Own builds: `rtk`, `impeccable-engine`. Claude Code and Codex themselves come from the `dev` module, `agy`
 and `grok` from the `ai` module. `ripgrep` and `git` are expected from the base setup.
 
