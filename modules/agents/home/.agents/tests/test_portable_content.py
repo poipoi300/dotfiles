@@ -128,6 +128,7 @@ class InstalledContentTests(unittest.TestCase):
             "designing-tuis", "gauntlet-loop", "humanizer",
             "image-generation", "ml-design", "reverse-engineer-anything", "sillytavern-local",
             "systematic-debugging", "vcs", "skill-pressure-testing", "council", "correct", "bro", "benchmark-checklist", "hillclimb",
+            "statechart", "create-verification-skill", "maintain-verification-skill",
         )
         for name in names:
             if not (SKILLS / name).is_dir():

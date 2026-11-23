@@ -6,7 +6,7 @@ deployed as `~/.agents` and ported from the Windows setup.
 | Piece | Where |
 |---|---|
 | Shared instructions (`AGENTS.md`, `RTK.md`), linked as `~/.claude/CLAUDE.md`, `~/.claude/RTK.md`, `~/.codex/AGENTS.md`, `~/.gemini/config/AGENTS.md`, `~/.grok/rules/AGENTS.md` | `home/.agents/`, `links` in `module.toml` |
-| 25 generic skills (agent-roles, benchmark-checklist, bro, building-runner-tuis, coding, correct, council, designing-tuis, forge, full-send, full-stop, gauntlet-loop, hillclimb, humanizer, impeccable, ml-design, project-management, project-setup, research-report, reverse-engineer-anything, skill-pressure-testing, sol-loop, systematic-debugging, system-changes, vcs) | `home/.agents/skills/` |
+| 28 generic skills (agent-roles, benchmark-checklist, bro, building-runner-tuis, coding, correct, council, create-verification-skill, designing-tuis, forge, full-send, full-stop, gauntlet-loop, hillclimb, humanizer, impeccable, maintain-verification-skill, ml-design, project-management, project-setup, research-report, reverse-engineer-anything, skill-pressure-testing, sol-loop, statechart, systematic-debugging, system-changes, vcs) | `home/.agents/skills/` |
 | MCP registry sync, skill links into Claude and Antigravity (`sync.py`), provider wrappers (`launch.py`, `bin/agent-*`, `bin/agy`) | `home/.agents/` |
 | Ten role briefs and the Claude, Codex, Antigravity and Grok adapter generators | `home/.agents/roles/` |
 | Native hooks (route and model guards, RTK rewrite for Codex and Grok, Impeccable design feedback, registration) | `home/.agents/hooks/` |
@@ -20,8 +20,8 @@ budget scripts, and personal skills. The private `agents-private` module adds th
 ## Packages
 
 pacman: `python` (3.11+), `python-yaml` (tests), `python-tomlkit` (edits to Grok's
-`config.toml`), `nodejs`, `npm` (`npx` MCP servers), `uv` (`uvx` MCP servers). Own builds:
-`rtk`, `impeccable-engine`. Claude Code and Codex themselves come from the `dev` module, `agy`
+`config.toml`), `nodejs`, `npm` (`npx` MCP servers), `uv` (`uvx` MCP servers). AUR:
+`tla-tools` (TLC for the `statechart` skill). Own builds: `rtk`, `impeccable-engine`. Claude Code and Codex themselves come from the `dev` module, `agy`
 and `grok` from the `ai` module. `ripgrep` and `git` are expected from the base setup.
 
 ## Install order

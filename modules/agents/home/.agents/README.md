@@ -143,8 +143,16 @@ profilers, GPU checks, and pointers to `hillclimb` and `ml-design` in place of p
 playbooks; its question 5 replaces upstream's "gap smaller than the run-to-run variation" rule,
 which rejects most real improvements, with a preset run count, warmup discard, ABBA order, and
 a rank-sum test. `principle-explain-the-number` was folded into `ml-design` (license beside it),
-and `hillclimb` now judges benchmark candidates by the checklist's question 5. Compare against upstream before
-updating.
+and `hillclimb` now judges benchmark candidates by the checklist's question 5. On 2026-11-22,
+from the same commit, `statechart`, `create-verification-skill` and its companion
+`maintain-verification-skill` came as skills (license beside each). Local changes: `statechart`
+gets TLC from the module's `tla-tools` AUR package (the jar upstream pins, same checksum), its
+launcher points `TLA2TOOLS` at that jar instead of installing TLC and Java through mise, its
+upstream tests were not copied (`package.json` keeps only the module type), and charts render
+with Pele 1.13.0 through Bun; the verification skills write `.agents/skills/verify-<app>/` with a
+`.claude/skills` link, write AGENTS.md's GUI isolation into the generated Launch, Doctor and
+Cleanup, and send product bugs to AGENTS.md "Fixing what you find broken". Compare against
+upstream before updating.
 The proxy-specific `image-generation` skill is reserved for that requested backend; ordinary
 image tasks use a runtime's built-in image skill when available.
 
