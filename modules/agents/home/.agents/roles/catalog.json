@@ -76,6 +76,17 @@
       }
     },
     {
+      "name": "impeccable-motion-reviewer",
+      "description": "Reviews captured Impeccable motion for continuity, timing, craft, and reduced-motion behavior, returning evidence-cited material fixes.",
+      "brief": "impeccable-motion-reviewer.md",
+      "claude": {
+        "tools": "Read, Bash, Glob, Grep",
+        "model": "inherit",
+        "effort": "high",
+        "maxTurns": 30
+      }
+    },
+    {
       "name": "ml-reviewer",
       "description": "Reviews ML code \u2014 training loops, data pipelines, feature engineering, evaluation, hyperparameter searches and how their results are reported \u2014 and runs sanity-check experiments and data analysis to back findings with evidence. Use on feature completion for ML work, alongside reviewer.",
       "brief": "ml-reviewer.md",
@@ -83,7 +94,10 @@
         "model": "inherit",
         "effort": "high",
         "tools": "Bash, Read, Grep, Glob",
-        "skills": ["ml-design", "coding"],
+        "skills": [
+          "ml-design",
+          "coding"
+        ],
         "maxTurns": 25
       }
     },
@@ -94,7 +108,9 @@
       "claude": {
         "model": "inherit",
         "tools": "Read, Grep, Glob, Bash",
-        "skills": ["coding"]
+        "skills": [
+          "coding"
+        ]
       }
     },
     {

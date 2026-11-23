@@ -24,6 +24,7 @@ Honor a request to work directly or without further subagents.
 | Finished UI review | `~/.agents/roles/impeccable-finish-reviewer.md` |
 | Design system recording | `~/.agents/roles/impeccable-documenter.md` |
 | Leased live copy edits | `~/.agents/roles/impeccable-manual-edit-applier.md` |
+| Captured motion review | `~/.agents/roles/impeccable-motion-reviewer.md` |
 
 ## Review loops
 

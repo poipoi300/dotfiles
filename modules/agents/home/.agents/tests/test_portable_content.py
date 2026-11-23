@@ -64,7 +64,7 @@ class InstalledContentTests(unittest.TestCase):
     @installed
     def test_all_ten_adapters_match_catalog_and_load_shared_briefs(self):
         roles = renderer.load_catalog(ROLES)
-        self.assertEqual(len(roles), 10)
+        self.assertEqual(len(roles), 11)
         for role in roles:
             with self.subTest(role=role["name"]):
                 path = HOME / ".claude/agents" / role["brief"]
@@ -138,13 +138,14 @@ class InstalledContentTests(unittest.TestCase):
                 self.assertTrue(valid, reason)
         metadata, _ = frontmatter(SKILLS / "impeccable/SKILL.md")
         self.assertEqual(metadata["name"], "impeccable")
-        self.assertEqual(metadata["version"], "4.8.0")
+        self.assertEqual(metadata["version"], "4.10.0")
         self.assertTrue(metadata["user-invocable"])
         self.assertEqual(metadata["license"], "Apache 2.0")
 
     def test_referenced_shared_role_and_local_markdown_paths_exist(self):
         files = [*ROLES.glob("*.md"), SKILLS / "agent-roles/SKILL.md", SKILLS / "humanizer/SKILL.md",
-                 SKILLS / "impeccable/reference/new-work.md", SKILLS / "impeccable/reference/live.md",
+                 SKILLS / "impeccable/reference/new-work.md", SKILLS / "impeccable/reference/new-work-comp.md",
+                 SKILLS / "impeccable/reference/animate.md", SKILLS / "impeccable/reference/live.md",
                  *list((SKILLS / "impeccable/reference/degraded").glob("*.md"))]
         for path in files:
             text = path.read_text(encoding="utf-8")

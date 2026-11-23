@@ -8,7 +8,7 @@
 # line for impeccable-linux-x64 from engine-checksums.txt into sha256sums (tests/test_packaging.py
 # checks this).
 pkgname=impeccable-engine
-pkgver=0.1.18
+pkgver=0.1.27
 pkgrel=1
 pkgdesc="Impeccable design engine (detector/hook CLI used by the impeccable agent skill)"
 arch=(x86_64)
@@ -17,7 +17,7 @@ license=(Apache-2.0)
 options=(!strip !debug)
 source=("impeccable-$pkgver-linux-x64::$url/releases/download/engine-v$pkgver/impeccable-linux-x64"
         "LICENSE-$pkgname::https://raw.githubusercontent.com/pbakaus/impeccable/engine-v$pkgver/LICENSE")
-sha256sums=('736ed785e74ae2344d3036127f614ddde5ab520a527d8bc82a891612ef71f648'
+sha256sums=('41d66e945bcdfc560005b61ad0b6b2312b124890039262f2e63322ef2709ccfd'
             '02bb8c3b4e70190e3986c0404ad2fd8d639b4f534252d82379cc1b502b6d1812')
 noextract=("impeccable-$pkgver-linux-x64")
 
