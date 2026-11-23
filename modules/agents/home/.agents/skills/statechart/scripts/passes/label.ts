@@ -84,21 +84,12 @@ export function ask(graph: Graph, { states: tla, nameOf, from, to }: Walk, view:
   const labels = new Array<string | Hidden>(m);
   for (let j = 0; j < m; j++)
     labels[j] = step(graph.steps[j].action, tla[from[j]].vars, tla[to[j]].vars);
-  const groups = new Array<unknown>(n);
-  const asked = new Uint8Array(n);
-  const group = (i: number) => {
-    if (view.group && !asked[i]) {
-      groups[i] = view.group(tla[i].vars);
-      asked[i] = 1;
-    }
-    return groups[i];
-  };
-  return { names, shapes, labels, group };
+  return { names, shapes, labels };
 }
 
 export function asParents(
   { states: tla }: Walk,
-  { names, shapes, labels, group }: Answers,
+  { names, shapes, labels }: Answers,
 ): Answers {
   const parents = new Array<Shape>(shapes.length);
   for (let i = 0; i < shapes.length; i++) {
@@ -106,7 +97,7 @@ export function asParents(
     for (const n of names) for (const p of shapes[i][n]) path.push(`${n} ${p}`);
     parents[i] = shapeOf(path, tla[i].vars);
   }
-  return { names: [""], shapes: parents, labels, group };
+  return { names: [""], shapes: parents, labels };
 }
 
 export function labelGraph(

@@ -13,7 +13,7 @@ import {
 } from "../ir.ts";
 
 export function loopCheck(
-  { regions, loops }: Chart,
+  { regions }: Chart,
   { names, keys, drawnLabels, sorted }: Labels,
   { index, from, to }: Walk,
   found: Bug[],
@@ -26,7 +26,7 @@ export function loopCheck(
   };
   const stepsFrom = new Map<number, number[]>();
   const arrowsFrom: Map<string, Arrow[]>[] = [];
-  if (loops.length) {
+  if (found.some((b) => b.loop !== undefined)) {
     for (const j of sorted) append(stepsFrom, from[j], j);
     for (const { arrows } of regions) {
       const out = new Map<string, Arrow[]>();

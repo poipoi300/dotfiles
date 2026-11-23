@@ -9,14 +9,16 @@ import { messageOf } from "./run.ts";
 
 const USAGE = `Usage: statechart SPEC.tla [--config FILE] [--view FILE] [--out DIR]
 
-Checks SPEC.tla with TLC and draws its state graph as Mermaid. Above 500 states, the chart
-draws only the paths to the rules that break, and with no rule broken there is no chart.mmd.
+Checks SPEC.tla with TLC and writes its state graph as Graphviz DOT: chart-RULE.dot for each
+rule that breaks, with that rule's path numbered, or chart.dot when every rule holds. Above 500
+states, the chart draws only the paths to the rules that break, and with no rule broken there
+is no chart.
   --config FILE  TLC config. Default: SPEC.cfg beside the spec.
-  --view FILE    A module that exports state(vars) and, if you want, step(action, from, to),
-                 group(vars), colors, and title. state() returns a string for a flat chart, an
-                 array for parent states, or an object for regions. Default: each state's values.
-                 colors gives each group blue, orange, purple, yellow, teal, tan, or pink.
-  --out DIR      Where to write report.md, chart.mmd, tlc.out, and tlc-RULE.out for each
+  --view FILE    A module that exports state(vars) and, if you want, step(action, from, to)
+                 and title. state() returns a string for a flat chart, an array for parent
+                 states (drawn as boxes around their children), or an object for regions.
+                 Default: each state's values.
+  --out DIR      Where to write report.md, the .dot charts, tlc.out, and tlc-RULE.out for each
                  property that breaks and each rule that breaks off the chart. The folder must
                  be new or empty. Default: SPEC-chart.
 Exit code: TLC's own on the config as written: 0 when every rule holds, 1 when a rule breaks,

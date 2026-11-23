@@ -141,8 +141,6 @@ export const CHART_STATES = 500;
 export type View = {
   state?: (vars: Vars) => unknown;
   step?: (action: string, from: Vars, to: Vars) => unknown;
-  group?: (vars: Vars) => unknown;
-  colors?: { [group: string]: string };
   title?: string;
 };
 
@@ -173,7 +171,6 @@ export type Answers = {
   names: string[];
   shapes: Shape[];
   labels: (string | Hidden)[];
-  group: (i: number) => unknown;
 };
 
 export type Labels = Answers & {
@@ -195,10 +192,7 @@ export type ChartState = {
   start: boolean;
   members: number[];
   works: boolean;
-  lead: boolean;
-  repeats: boolean;
   breaks: { rule: Rule; always: boolean }[];
-  group: unknown;
 };
 
 export type Condition =
@@ -233,9 +227,6 @@ export type Chart = {
   notes: string[];
   inside: number;
   quiet: number;
-  colors: { [group: string]: string };
-  paths: string[];
-  loops: string[];
   lie?: string;
 };
 

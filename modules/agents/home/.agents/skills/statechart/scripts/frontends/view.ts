@@ -43,28 +43,13 @@ const jsonVars = (vars: Vars) => {
   return j;
 };
 
-const THEME_COLORS = ["blue", "orange", "purple", "yellow", "teal", "tan", "pink"];
-
 const isFunction = (v: unknown): v is (...args: unknown[]) => unknown => typeof v === "function";
-
-const isPlainObject = (v: unknown): v is { [key: string]: unknown } => {
-  if (typeof v !== "object" || v === null) return false;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
-};
 
 const isString = (v: unknown) => typeof v === "string";
 
-const VIEW_EXPORTS = ["state", "step", "group", "colors", "title"];
+const VIEW_EXPORTS = ["state", "step", "title"];
 
-type Inspect = (value: unknown, options: { breakLength: number }) => string;
-
-export function checkView(
-  view: { readonly [name: string]: unknown },
-  inspect: Inspect,
-): CheckedView {
-  const literal = (v: unknown) =>
-    typeof v === "string" ? JSON.stringify(v) : inspect(v, { breakLength: Infinity });
+export function checkView(view: { readonly [name: string]: unknown }): CheckedView {
   const extra: string[] = [];
   for (const name of Object.keys(view)) if (!VIEW_EXPORTS.includes(name)) extra.push(name);
   if (extra.length)
@@ -80,39 +65,13 @@ export function checkView(
   };
   const state = pick("state", "a function", isFunction);
   const step = pick("step", "a function", isFunction);
-  const group = pick("group", "a function", isFunction);
-  const exported = pick("colors", "a plain object", isPlainObject);
   const title = pick("title", "a string", isString);
   if (wrong.length) throw new Error(`The view's ${list(wrong)}.`);
-  if (group !== undefined && exported === undefined)
-    throw new Error("The view exports group() but no colors. Give each group a color in colors.");
-  const colors: { [group: string]: string } = Object.create(null);
-  const bad: string[] = [];
-  for (const [name, color] of Object.entries(exported ?? {})) {
-    if (typeof color === "string" && THEME_COLORS.includes(color)) colors[name] = color;
-    else bad.push(`${JSON.stringify(name)} the color ${literal(color)}`);
-  }
-  if (bad.length)
-    throw new Error(
-      `The view's colors give ${list(bad)}. Give each group ${list(THEME_COLORS, "or")}.`,
-    );
-  const named =
-    group &&
-    ((vars: Vars) => {
-      const g = group(jsonVars(vars));
-      if (g !== undefined && !Object.hasOwn(colors, typeof g === "symbol" ? g : String(g)))
-        throw new Error(
-          `The view's group() returned ${literal(g)}, which colors does not name. Give each group a color in colors.`,
-        );
-      return g;
-    });
   return {
     state: state && ((vars: Vars) => state(jsonVars(vars))),
     step:
       step &&
       ((action: string, from: Vars, to: Vars) => step(action, jsonVars(from), jsonVars(to))),
-    group: named,
-    colors,
     title,
     [checked]: true,
   };

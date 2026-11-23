@@ -2,7 +2,6 @@ import { Buffer } from "node:buffer";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { inspect } from "node:util";
 import { checkView } from "./frontends/view.ts";
 import { compile } from "./pipeline.ts";
 import { check, messageOf } from "./run.ts";
@@ -10,10 +9,7 @@ import { check, messageOf } from "./run.ts";
 const [stage, specFile, configFile, viewFile] = process.argv.slice(2);
 
 try {
-  const view = checkView(
-    viewFile ? await import(pathToFileURL(path.resolve(viewFile)).href) : {},
-    inspect,
-  );
+  const view = checkView(viewFile ? await import(pathToFileURL(path.resolve(viewFile)).href) : {});
   const { files, exit } = compile(await check(specFile, configFile), view);
   const draft = path.join(stage, "draft");
   fs.mkdirSync(draft);

@@ -1,7 +1,6 @@
 import {
   append,
   type Arrow,
-  type Bug,
   byText,
   type Chart,
   type ChartState,
@@ -10,12 +9,10 @@ import {
   hasRule,
   holds,
   type Labels,
-  loopOf,
   must,
   type Region,
   type Rule,
   ruleKey,
-  seqOf,
   tupleKey,
   unkey,
   type View,
@@ -33,21 +30,14 @@ type RegionMove = {
 };
 
 export function drawRegions(
-  { states: tla, index, from, to }: Walk,
-  { names, shapes, drawnLabels, group, keys, kinds, sizes, sorted, pathSteps, notes }: Labels,
+  { states: tla, from, to }: Walk,
+  { names, shapes, drawnLabels, keys, kinds, sizes, sorted, pathSteps, notes }: Labels,
   order: Int32Array,
-  found: Bug[],
   view: View,
 ): Chart {
   const n = shapes.length;
   const m = drawnLabels.length;
   const R = names.length;
-  const lead = new Uint8Array(n);
-  const looped = new Uint8Array(n);
-  for (const b of found) {
-    for (const i of seqOf(b, index).slice(0, b.loop)) lead[i] = 1;
-    for (const i of loopOf(b, index)) looped[i] = 1;
-  }
   const loop = (j: number) => R === 1 && pathSteps[j] === 1;
   const stays = (j: number) => {
     for (let r = 0; r < R; r++) if (kinds[r][from[j]] !== kinds[r][to[j]]) return false;
@@ -90,10 +80,7 @@ export function drawRegions(
           start: false,
           members: [],
           works: false,
-          lead: false,
-          repeats: false,
           breaks: [],
-          group: undefined,
         };
         objectOf[kind[i]] = o;
         keyOf[kind[i]] = key[i];
@@ -102,8 +89,6 @@ export function drawRegions(
       }
       o.start ||= s.start;
       o.works ||= clean[i] === 1;
-      o.lead ||= lead[i] === 1;
-      o.repeats ||= looped[i] === 1;
       o.members.push(i);
     }
     const parents = new Set<string>();
@@ -124,9 +109,6 @@ export function drawRegions(
         for (const i of s.members) always &&= hasRule(tla[i].breaks, rule);
         s.breaks.push({ rule, always });
       }
-      const groups = new Set<unknown>();
-      for (const i of s.members) groups.add(group(i));
-      s.group = groups.size === 1 ? [...groups][0] : undefined;
     }
     const others: number[] = [];
     for (let o = 0; o < R; o++) if (o !== r) others.push(o);
@@ -276,20 +258,11 @@ export function drawRegions(
     if (works) hidden.push(ps);
   }
   for (const ps of hidden) for (const s of ps) s.works = false;
-  const paths: string[] = [];
-  const loops: string[] = [];
-  for (const b of found) {
-    if (b.loop !== 0) paths.push(b.rule.name);
-    if (b.loop !== undefined) loops.push(b.rule.name);
-  }
   return {
     title: view.title,
     regions,
     notes,
     inside,
     quiet: m - sorted.length,
-    colors: view.colors ?? {},
-    paths,
-    loops,
   };
 }
