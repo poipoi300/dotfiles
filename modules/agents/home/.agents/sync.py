@@ -224,10 +224,28 @@ def split_managed_toml(text: str) -> tuple[str, dict]:
     if len(starts) != 1 or len(ends) != 1 or ends[0].start() < starts[0].end():
         raise SyncError("Codex managed block markers are missing or repeated")
     before, block, after = text[:starts[0].start()], text[starts[0].end():ends[0].start()], text[ends[0].end():]
-    parsed = tomllib.loads(block)
-    if set(parsed) - {"mcp_servers"}:
+    # The block is written last, so Codex appends its own tables (such as hooks.state) inside it,
+    # before END. Split at column-0 table headers and hand every non-MCP table back to the file.
+    heads = [m.start() for m in re.finditer(r"(?m)^\[", block)]
+    ours, foreign = [block[:heads[0]] if heads else block], []
+    try:
+        if tomllib.loads(ours[0]):
+            raise SyncError("Unexpected settings in the Codex managed MCP block")
+        for start, end in zip(heads, heads[1:] + [len(block)]):
+            chunk = block[start:end]
+            # A chunk normally holds one top-level key; a mixed one (an indented header) lands in
+            # foreign, and the equality check below refuses it.
+            (ours if set(tomllib.loads(chunk)) == {"mcp_servers"} else foreign).append(chunk)
+        servers = tomllib.loads("".join(ours)).get("mcp_servers", {})
+        whole = tomllib.loads(block)
+    except tomllib.TOMLDecodeError as error:
+        raise SyncError(f"Cannot split the Codex managed MCP block: {error}") from None
+    if servers != whole.get("mcp_servers", {}):
         raise SyncError("Unexpected settings in the Codex managed MCP block")
-    return before + after, parsed.get("mcp_servers", {})
+    if not foreign:
+        return before + after, servers
+    moved = "".join(chunk if chunk.endswith("\n") else chunk + "\n" for chunk in foreign)
+    return before.rstrip("\r\n") + "\n\n" + moved + after, servers
 
 
 def toml_block(servers: dict) -> str:

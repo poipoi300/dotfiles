@@ -110,6 +110,30 @@ class SyncTests(unittest.TestCase):
         with self.assertRaisesRegex(sync.SyncError, "Drift"):
             sync.prepare(self.home, self.registry)
 
+    def test_codex_tables_appended_inside_the_trailing_block_are_moved_out_and_kept(self):
+        # The managed block is written last, so Codex appends its own tables (hooks.state) before END.
+        sync.apply(self.home, self.registry)
+        appended = '[hooks.state."/x/hooks.json:stop:0:0"]\ntrusted_hash = "abc"\n'
+        text = self.codex.read_text()
+        self.codex.write_text(text.replace(sync.END, appended + sync.END))
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        outside = text[:text.index(sync.BEGIN)] + text[text.index(sync.END) + len(sync.END):]
+        self.assertIn(appended, outside)
+        parsed = tomllib.loads(text)
+        self.assertEqual(parsed["hooks"]["state"]["/x/hooks.json:stop:0:0"], {"trusted_hash": "abc"})
+        self.assertEqual(parsed["model"], "existing-model")
+        self.assertEqual(sorted(parsed["mcp_servers"]), ["node_repl", "sample"])
+        sync.apply(self.home, self.registry)
+        self.assertEqual(self.codex.read_text(), text)
+
+    def test_codex_keys_before_the_first_table_in_the_block_are_still_refused(self):
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        self.codex.write_text(text.replace(sync.BEGIN, sync.BEGIN + 'stray = "x"\n'))
+        with self.assertRaisesRegex(sync.SyncError, "Unexpected settings"):
+            sync.prepare(self.home, self.registry)
+
     def test_registry_update_and_removal_touch_only_owned_entries(self):
         sync.apply(self.home, self.registry)
         self.registry.write_text(json.dumps({"mcpServers": {"sample": {"command": "updated"}}}))
