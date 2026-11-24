@@ -6,9 +6,11 @@ description: Use only when the user says hillclimb.
 # Hillclimb
 
 Pursue a goal through repeated changes and evaluation. Keep the best supported
-result and continue until the acceptance criteria are met or a supplied deadline,
-round limit, or task quota is reached, whichever happens first. A plateau,
-an unsuccessful attempt, or "good enough" below the target is not a stop condition.
+result and continue until the acceptance criteria are met, a supplied limit
+(deadline, round cap, or quota) is reached, or a diminishing-returns circuit
+breaker triggers an autonomous pivot or finish. An unsuccessful single attempt
+or "good enough" below the target is not a stop condition—keep iterating while
+rounds produce real progress.
 
 ## Establish the run
 
@@ -40,10 +42,15 @@ If the baseline already meets every acceptance criterion, finish immediately.
 For a benchmark number or a model score, also reserve time and quota for the
 final confirmation (see Keep or reject); like the baseline, it uses no round.
 
-For Council verification, load Council and agree on its fixed rubric, reviewers,
-aggregation, and target before the first review. Each changed candidate needs a
-fresh review; the builder's own rating is not verification. Keep the same review
-contract across rounds so scores remain comparable.
+For Council verification, load Council and fix the rubric, aggregation rule, and
+acceptance target before the first review. Each changed candidate needs a fresh
+review; the builder's own rating is not verification. Keep the rubric and
+acceptance rule stable across rounds so scores remain comparable, but keep
+reviewers **blind** to the target score, round count, and prior-round scores,
+and rotate model families across lenses automatically across rounds (the loop
+owner chooses which seats/lenses fit each round). Prefer Code Council's
+witnessed pass/fail gate over open-ended numeric targets whenever the candidate
+is code.
 
 ## Make limits enforceable
 
@@ -118,10 +125,31 @@ repeat the same failed edit unchanged, lower the target, switch metrics, or coac
 Council toward higher scores. A necessary rubric change must be explicit and
 requires re-evaluating the incumbent before comparing new candidates.
 
-Keep concise progress updates during sustained work: best result, remaining gap,
-attempts used, and remaining limits where known. Keep the run ledger with the
-project when it must survive a context reset; preserve it rather than restarting
-the round count, clock, or accounting.
+Apply two diminishing-returns circuit breakers—scaled by round cost and speed,
+not raw elapsed time (a legitimate huge build may run for hours while making
+steady forward progress):
+
+- **Plateau without improvement (base: 3 consecutive rounds):** Track the best
+  supported score/metric and each round's wall time and tightest weekly pool
+  burn (`budget.py --route` `burn=%/M` and live usage deltas). Tighten the
+  plateau window to **2 consecutive non-improving rounds** when rounds are heavy
+  or slow (e.g., `> 1.5%` of any provider's weekly pool or `> 25 min` per
+  round), and relax to **4–5 rounds** when rounds are cheap and fast (`< 0.3%`
+  pool and `< 5 min` per round).
+- **Same blocker class > 2 rounds:** If the same file or defect class produces
+  blocking findings on more than 2 rounds, stop symptom-patching immediately.
+  Do not hand back to the user as a reflex—**pivot autonomously**: redesign the
+  root boundary or bound an unbounded spec promise, or if the remaining phase
+  is scaffold/polishing noise, keep the best supported candidate and advance to
+  the next implementation milestone (or finish cleanly with the exact gap
+  recorded).
+
+Keep builder context lean across long runs: persist the run ledger with the
+project and use clean scoped contexts or subagents per milestone/fix pass rather
+than accumulating many compactions in one monolithic builder session. Keep
+concise progress updates during sustained work: best result, remaining gap,
+attempts used, and remaining limits where known; preserve the ledger rather than
+restarting the round count, clock, or accounting.
 
 ## Finish honestly
 

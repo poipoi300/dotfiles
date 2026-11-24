@@ -54,25 +54,32 @@ delegation rules, user-selected providers/models, and any restriction on agents.
   A shared role brief is not proof of a registered agent or connected provider.
 - Use different model families or providers when available, permitted, and
   useful; separate runs of one model are acceptable, with reduced diversity
-  disclosed. Choose by strength, not hardcoded IDs: GPT-family models for the
-  harsh technical seats (correctness, security, performance, data-structures),
-  Claude for judgment and taste (rules, style, code-health, duplication), and
-  for the blind seat a family other than the correctness seat's. Respect
-  supplied reviewer counts, concurrent work, deadline, and quota. A smaller
-  code council drops seats; a dropped blocking seat is `missing` and leaves the
-  gate `unverified`. Fix the panel before collecting judgments.
+  disclosed. Prefer reviewer families distinct from the builder when healthy
+  alternatives exist. Choose by strength and pool-normalized quota efficiency
+  (`budget.py --route` `burn=%/M` alongside pace), not hardcoded IDs: GPT-family
+  models for harsh technical seats (correctness, security, performance,
+  data-structures), Claude for judgment and taste (rules, style, code-health,
+  duplication), and for the blind seat a family other than the correctness
+  seat's. Reserve providers with high weekly pool burn per token for targeted
+  passes where their diversity matters most rather than every round of a long
+  loop. Respect supplied reviewer counts, concurrent work, deadline, and quota.
+  A smaller code council drops seats; a dropped blocking seat is `missing` and
+  leaves the gate `unverified`. Fix the panel before collecting judgments.
 - If delegation is unavailable or prohibited, report that an independent Council
   could not be formed. A direct assessment can still help, but does not count as
   multiple reviews. Do not silently replace an unavailable requested provider.
 
-Reviewers are read-only on the user's checkout and must not delegate. Run them
-concurrently where supported and affordable, otherwise sequentially. Send each
-the same candidate and raw evidence plus its own brief. Do not send the
-builder's self-rating, effort, desired verdict, or other reviewers' opinions.
-Pass each reviewer its remaining time and allocated quota, and stop outstanding
-work when the caller's limit or cancellation applies. Do not wait idle, and do
-not change the candidate until every reviewer has finished. Council sets each
-reviewer's output contract; the roles' default report formats do not apply.
+Reviewers are read-only on the user's checkout and must not delegate (hooks
+enforce this for child reviewers). Run them concurrently where supported and
+affordable, otherwise sequentially. Send each the same candidate and raw
+evidence plus its own brief. Never send the builder's self-rating, effort,
+desired verdict, acceptance target / score threshold, round number, prior-round
+scores, or other reviewers' opinions—keep reviewers blind to the target so
+scores stay unanchored. Pass each reviewer its remaining time and allocated
+quota, and stop outstanding work when the caller's limit or cancellation
+applies. Do not wait idle, and do not change the candidate until every reviewer
+has finished. Council sets each reviewer's output contract; the roles' default
+report formats do not apply.
 
 ## Code council
 
@@ -297,14 +304,21 @@ An evaluation can provide critique without a pass target; do not invent one.
 When a verdict is needed, fix the acceptance threshold, mandatory constraints,
 and aggregation rule before collecting reviews. Keep these stable across rounds.
 
-Default to three independent reviewers with complementary focuses, such as
-domain quality, user impact, and failure modes; any agreed smaller panel still
-needs at least two. Send each the same candidate, rubric, target if any, and raw
-evidence. A numeric target is a boundary to assess, not a score to aim for. Ask
-each for criterion-level judgments and requested scores; concrete evidence or
-locations; important strengths, defects, and uncertainties; whether the target
-is met; and the highest-impact improvements. Reviewers identify real defects
-without manufacturing objections or awarding unsupported praise.
+Default to three independent reviewers with complementary focuses chosen by the
+caller for the current artifact (such as domain quality, user impact, and
+failure modes); any agreed smaller panel still needs at least two. Across
+repeated rounds, keep the **rubric and acceptance rule** stable, not the
+model-to-focus mapping: let the caller choose which lenses fit each round,
+rotate which model family covers which focus automatically so lenses do not go
+stale (avoid keeping one model family on the same lens for more than two
+rounds), and avoid re-running untouched or already-clean domains unless a fresh
+pass is warranted. Send each reviewer the same candidate, rubric anchors, and
+raw evidence—**never** the numeric target, pass threshold, round number, or
+prior scores; the caller alone compares the aggregated result against any
+target. Ask each for criterion-level judgments and requested scores; concrete
+evidence or locations; important strengths, defects, and uncertainties; and the
+highest-impact improvements. Reviewers identify real defects without
+manufacturing objections or awarding unsupported praise.
 
 Keep individual judgments visible. Separate agreement, dissent, and missing
 coverage. Check factual objections against the artifact; do not vote away a
@@ -340,12 +354,15 @@ decides which are true, relevant, and worth acting on, and may accept, defer, or
 reject them based on its own inspection and judgment. Reviewer agreement does
 not make a suggestion binding. Briefly explain material rejections or deferrals,
 such as an incorrect premise, an out-of-scope concern, or an unfavorable
-tradeoff. Guard the scope: repeated rounds tend to grow the change one
-cheap-looking suggestion at a time. Decline extra tests, rare-case guards, added
+tradeoff. Guard the scope: repeated rounds tend to grow the change one cheap-looking
+suggestion at a time. Decline extra tests, rare-case guards, added
 compatibility, and small performance work the goal does not need, and list them
-as follow-ups. Rejecting advice does not erase a confirmed required-check
-failure, a blocking witnessed claim, the agreed acceptance criteria, or the
-Council's recorded judgments.
+as follow-ups. When repeated findings stem from an unbounded spec promise
+(e.g., claiming heuristic detection catches every possible secret spelling),
+narrow or restructure the contract instead of chasing infinite edge-case
+patches. Rejecting advice does not erase a confirmed required-check failure, a
+blocking witnessed claim, the agreed acceptance criteria, or the Council's
+recorded judgments.
 
 Council finishes with the evaluation. In a Hillclimb run, return it to the loop
 owner; do not start a second improvement loop or alter its limits or rubric.
