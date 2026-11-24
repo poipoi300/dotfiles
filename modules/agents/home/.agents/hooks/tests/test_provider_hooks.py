@@ -241,11 +241,56 @@ class AntigravityTests(unittest.TestCase):
 
     def test_session_start_injects_usage_as_a_system_message(self):
         start = {**antigravity("x", {}, "SessionStart"), "toolCall": None}
-        with patch.object(native, "budget", types.SimpleNamespace(startup=lambda cwd: "Usage: fixture")):
-            self.assertEqual(native.dispatch("antigravity", start),
-                             {"injectSteps": [{"systemMessage": {"systemMessage": "Usage: fixture"}}]})
-        with patch.object(native, "budget", None):
-            self.assertEqual(native.dispatch("antigravity", start), {})
+        with tempfile.TemporaryDirectory(prefix="agy-start-") as td:
+            with patch.object(native, "ROOT", Path(td)), \
+                 patch.object(native, "budget", types.SimpleNamespace(startup=lambda cwd: "Usage: fixture")):
+                self.assertEqual(native.dispatch("antigravity", start),
+                                 {"injectSteps": [{"systemMessage": {"systemMessage": "Usage: fixture"}}]})
+            with patch.object(native, "ROOT", Path(td)), patch.object(native, "budget", None):
+                self.assertEqual(native.dispatch("antigravity", start), {})
+
+    def test_pre_invocation_refreshes_antigravity_budget_only_when_stale(self):
+        with tempfile.TemporaryDirectory(prefix="agy-mid-") as td:
+            root = Path(td)
+            startup = unittest.mock.Mock(side_effect=["[Budget start]", "[Budget refreshed]"])
+            start = {**antigravity("x", {}, "SessionStart"), "conversationId": "agy-conv-1", "toolCall": None}
+            pre_inv = {"conversationId": "agy-conv-1", "cwd": "/tmp", "hookEventName": "PreInvocation",
+                       "modelName": "gemini-4-neon-high", "invocationNum": 2}
+            with patch.object(native, "ROOT", root), \
+                 patch.object(native, "budget", types.SimpleNamespace(startup=startup)):
+                first = native.dispatch("antigravity", start)
+                self.assertEqual(first, {"injectSteps": [{"systemMessage": {"systemMessage": "[Budget start]"}}]})
+                # Fresh marker -> PreInvocation stays silent (no duplicate injection).
+                self.assertEqual(native.dispatch("antigravity", pre_inv), {})
+                self.assertEqual(startup.call_count, 1)
+                # Expire marker -> PreInvocation injects refreshed budget snapshot.
+                marker = native._session_budget_marker("antigravity", "agy-conv-1")
+                marker.write_text(json.dumps({"at": 1.0}), encoding="utf-8")
+                refreshed = native.dispatch("antigravity", pre_inv)
+                self.assertEqual(refreshed, {"injectSteps": [{"systemMessage": {"systemMessage": "[Budget refreshed]"}}]})
+                self.assertEqual(startup.call_count, 2)
+                # Immediately after refresh, PreInvocation is quiet again.
+                self.assertEqual(native.dispatch("antigravity", pre_inv), {})
+
+    def test_antigravity_council_child_cannot_spawn_subagents_but_parent_can(self):
+        child_input = (
+            "<t3_code_instructions>As a subagent or child, do the work yourself. Start no subagents.</t3_code_instructions>\n"
+            "<user_request>\n"
+            '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n\n'
+            "You are an independent Panel Council reviewer. Do NOT delegate to any subagent.\n"
+            "</user_request>"
+        )
+        parent_input = (
+            "<t3_code_instructions>As a subagent or child, do the work yourself. Start no subagents.</t3_code_instructions>\n"
+            "<user_request>\nBuild the service and run a council review.\n</user_request>"
+        )
+        child_call = {**antigravity("invoke_subagent", {"Model": "flash", "Prompt": "check db"}), "lastUserInput": child_input}
+        denied = native.dispatch("antigravity", child_call)
+        self.assertEqual(denied["decision"], "deny")
+        self.assertIn("must not spawn subagents", denied["reason"])
+
+        parent_call = {**antigravity("invoke_subagent", {"Model": "flash", "Prompt": "check db"}), "lastUserInput": parent_input}
+        self.assertEqual(native.dispatch("antigravity", parent_call), {})
 
 
 class RegistrationTests(unittest.TestCase):
@@ -409,6 +454,7 @@ class RegistrationTests(unittest.TestCase):
             "mcp_t3-code_t3_thread_launch", "mcp_t3-code_create_threads",
         ])
         self.assertTrue(entry["SessionStart"][0]["command"].endswith(" antigravity || true"))
+        self.assertTrue(entry["PreInvocation"][0]["command"].endswith(" antigravity || true"))
         self.assertEqual(register.synchronize(self.home), [])
 
     def test_antigravity_command_passes_through_when_the_hook_script_is_missing(self):

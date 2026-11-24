@@ -76,14 +76,15 @@ def handlers(home: Path, provider: str) -> dict:
         return {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": command, "timeout": 20}]}],
                 "PostToolUse": [{"matcher": GROK_SHELL, "hooks": [{"type": "command", "command": command, "timeout": 5}]}]}
     if provider == "antigravity":
-        # Exact tool names, one group each.
+        # Exact tool names, one group each; PreInvocation refreshes mid-session budget when stale.
         handler = {"type": "command", "command": command, "timeout": 10}
         return {"PreToolUse": [{"matcher": tool, "hooks": [dict(handler)]}
                                for tool in ("run_command", "invoke_subagent",
                                             "mcp_t3-code_delegate_task",
                                             "mcp_t3-code_t3_thread_launch",
                                             "mcp_t3-code_create_threads")],
-                "SessionStart": [{**handler, "timeout": 20}]}
+                "SessionStart": [{**handler, "timeout": 20}],
+                "PreInvocation": [{**handler, "timeout": 20}]}
     result = {}
     for event, matcher, timeout in (
         ("SessionStart", None, 20),

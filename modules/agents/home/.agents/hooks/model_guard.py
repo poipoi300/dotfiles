@@ -1,9 +1,11 @@
 """Factor-derived efficiency guards for subagent, delegate, and thread launches.
 
-Enforces three model-agnostic checks without hardcoding model version slugs:
-1. Block Claude native transcript forks when the parent context exceeds 150k tokens.
-2. Block Antigravity subagents from inheriting a non-Gemini third-party (`3p`) pool model.
-3. Require an explicit `[ultra: <reason>]` opt-in when delegating to an ultra-tier model
+Enforces model-agnostic checks without hardcoding model version slugs:
+1. Block council/review or explicit no-delegation child sessions from spawning subagents.
+2. Block review/council delegation prompts that leak a numeric target score / pass threshold.
+3. Block Claude native transcript forks when the parent context exceeds 150k tokens.
+4. Block Antigravity subagents from inheriting a non-Gemini third-party (`3p`) pool model.
+5. Require an explicit `[ultra: <reason>]` opt-in when delegating to an ultra-tier model
    (blended token rate >= 3x the provider's standard tier in live local rate metadata).
 """
 
@@ -27,8 +29,54 @@ except ImportError:
 FORK_CONTEXT_LIMIT = 150_000
 ULTRA_COST_RATIO = 3.0
 TRANSCRIPT_TAIL_BYTES = 131_072
+TRANSCRIPT_HEAD_MAX_BYTES = 1024 * 1024
 TRANSCRIPT_MAX_TAIL_BYTES = 4 * 1024 * 1024
 ULTRA_OPT_IN = re.compile(r"\[ultra:\s*\S[^\]]*\]", re.IGNORECASE)
+SAFE_SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+T3_CHILD_PREFIX = re.compile(
+    r'\[T3 Code:\s*the agent in T3 thread "[^"]+" sent this message,\s*not the user\.\]',
+    re.IGNORECASE,
+)
+CHILD_EXPLICIT_NO_DELEGATE_RE = re.compile(
+    r"\b(?:(?:do\s+not|don't|must\s+not|mustn't|never|cannot|can't|not\s+allowed\s+to)\s+"
+    r"(?:delegate|spawn\s+subagents|start\s+subagents|launch\s+subagents|use\s+subagents)|"
+    r"start\s+no\s+subagents|no\s+subagents)\b",
+    re.IGNORECASE,
+)
+CHILD_REVIEW_ROLE_RE = re.compile(
+    r"\b(?:panel\s+council\s+reviewer|code\s+council|independent\s+(?:panel\s+)?council\s+reviewer|"
+    r"council\s+reviewer|review\s+sub-?agent|break-?it\s+seat)\b",
+    re.IGNORECASE,
+)
+CHILD_ALLOW_DELEGATE_RE = re.compile(
+    r"(?<!not\s)(?<!never\s)\b(?:you\s+may|authorized\s+to|explicitly\s+allowed\s+to|permitted\s+to)\s+"
+    r"(?:delegate|spawn\s+subagents|start\s+subagents|launch\s+subagents)\b",
+    re.IGNORECASE,
+)
+REVIEW_DELEGATION_RE = re.compile(
+    r"\b(?:council|reviewer|adversary|rubric|independent\s+review|panel\s+council|code\s+council|"
+    r"review\s+sub-?agent|adversarial\s+audit|read-only\s+audit)\b",
+    re.IGNORECASE,
+)
+_SCORE_VAL = r"(?:[0-9](?:\.[0-9]+)?|10(?:\.0+)?)"
+TARGET_SCORE_LEAK_RE = re.compile(
+    rf"(?:"
+    # Explicit score/rating/bar/threshold/target paired with a score value (with or without /10).
+    rf"\b(?:(?:target|pass(?:ing)?|acceptance|consensus|minimum)\s+(?:score|rating|grade|bar|threshold)|"
+    rf"acceptance\s+target|consensus\s+target|score\s+to\s+(?:beat|reach|hit))\b"
+    rf"[^\n]{{0,30}}?(?:(?:>=|≥|at\s+least|of|is|=|:)\s*)?{_SCORE_VAL}(?:\s*/\s*10)?\b"
+    rf"|"
+    # Action phrasing ("until it reaches 9.0", "must score 9.5", "aim for 9.5/10").
+    rf"\b(?:must\s+(?:score|reach|hit|exceed)|aim(?:ing)?\s+for|until\s+(?:it\s+)?reaches?)\b"
+    rf"[^\n]{{0,30}}?(?:(?:>=|≥|at\s+least)\s*)?(?:{_SCORE_VAL}\s*/\s*10\b|[0-9]\.[0-9]+\b|10(?:\.0+)?\s*(?:/\s*10|points?|out\s+of\s+10)\b)"
+    rf"|"
+    # Explicit X/10 paired with target/consensus/threshold/pass bar on either side.
+    rf"\b(?:target|consensus|threshold|pass(?:ing)?\s+(?:bar|score|target))\b[^\n]{{0,30}}?{_SCORE_VAL}\s*/\s*10\b"
+    rf"|"
+    rf"\b{_SCORE_VAL}\s*/\s*10\s+(?:target|consensus|threshold|pass(?:ing)?\s+(?:bar|score))\b"
+    rf")",
+    re.IGNORECASE,
+)
 EFFORT_SUFFIX = re.compile(r"-(?:low|medium|high|xhigh|max|ultra)$", re.IGNORECASE)
 DATE_SUFFIX = re.compile(r"(?:-20\d{2}(?:-?\d{2}){0,2}|-(?:0\d|1[0-2])\d{2})(?=$|[-@])")
 NON_CANONICAL_PREFIX = re.compile(
@@ -300,11 +348,171 @@ def _check_ultra_tier(payload: dict, home: Path | None = None) -> dict | None:
     return None
 
 
+def _extract_prompt_texts(value: object) -> list[str]:
+    texts: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            kl = key.lower()
+            if kl in ("task", "prompt", "brief", "message", "title", "role", "subagent_type", "typename") and isinstance(item, str) and item.strip():
+                texts.append(item)
+            elif isinstance(item, (dict, list)):
+                texts.extend(_extract_prompt_texts(item))
+    elif isinstance(value, list):
+        for item in value:
+            texts.extend(_extract_prompt_texts(item))
+    return texts
+
+
+def _strip_t3_boilerplate(text: str) -> str:
+    return re.sub(r"<t3_code_instructions>.*?</t3_code_instructions>", "", text, flags=re.S | re.I)
+
+
+def _child_task_body(payload: dict, home: Path | None = None) -> tuple[bool, str]:
+    """Return `(is_child_session, task_text)` for delegated T3 children and native subagents."""
+    is_native_sub = bool(payload.get("subagentType"))
+    tpath_raw = payload.get("transcript_path")
+    tpath = Path(tpath_raw) if isinstance(tpath_raw, str) and tpath_raw.strip() else None
+    if tpath is not None and "/subagents/" in tpath.as_posix():
+        is_native_sub = True
+
+    # Antigravity passes lastUserInput directly in PreToolUse payloads.
+    last_in = payload.get("last_user_input")
+    if isinstance(last_in, str) and last_in.strip():
+        cleaned = _strip_t3_boilerplate(last_in)
+        match = T3_CHILD_PREFIX.search(cleaned)
+        if match:
+            return True, cleaned[match.end():]
+        if is_native_sub:
+            return True, cleaned
+
+    # Inspect head of transcript file (preferring sibling transcript_full.jsonl for Antigravity).
+    candidates: list[Path] = []
+    if tpath is not None:
+        if tpath.name == "transcript.jsonl":
+            full = tpath.with_name("transcript_full.jsonl")
+            if full.is_file():
+                candidates.append(full)
+        if tpath.is_file():
+            candidates.append(tpath)
+    else:
+        # Grok delegated sessions store their first user prompt in ~/.grok/sessions/*/<session_id>/chat_history.jsonl.
+        sid = payload.get("session_id") or payload.get("sessionId")
+        if isinstance(sid, str) and SAFE_SESSION_ID.fullmatch(sid):
+            grok_sessions = (Path.home() if home is None else home) / ".grok" / "sessions"
+            if grok_sessions.is_dir():
+                for chat_path in grok_sessions.glob(f"*/{sid}/chat_history.jsonl"):
+                    if chat_path.is_file():
+                        candidates.append(chat_path)
+                        break
+
+    for path in candidates:
+        user_chunks: list[str] = []
+        bytes_read = 0
+        try:
+            with path.open("rb") as stream:
+                for raw_line in stream:
+                    bytes_read += len(raw_line)
+                    try:
+                        entry = json.loads(raw_line.decode("utf-8", errors="replace"))
+                    except ValueError:
+                        if bytes_read >= TRANSCRIPT_HEAD_MAX_BYTES:
+                            break
+                        continue
+                    if not isinstance(entry, dict):
+                        continue
+                    etype = entry.get("type")
+                    found_chunks: list[str] = []
+                    if etype == "user" or entry.get("role") == "user":
+                        msg = entry.get("message") if isinstance(entry.get("message"), dict) else entry
+                        content = msg.get("content")
+                        if isinstance(content, str):
+                            found_chunks.append(content)
+                        elif isinstance(content, list):
+                            found_chunks.extend(
+                                str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("text")
+                            )
+                    elif etype == "USER_INPUT":
+                        content = entry.get("content")
+                        if isinstance(content, str):
+                            found_chunks.append(content)
+                    elif etype == "response_item":
+                        pl = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+                        if pl.get("role") == "user":
+                            content = pl.get("content")
+                            if isinstance(content, str):
+                                found_chunks.append(content)
+                            elif isinstance(content, list):
+                                found_chunks.extend(
+                                    str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("text")
+                                )
+                    elif etype == "session_meta":
+                        pl = entry.get("payload") if isinstance(entry.get("payload"), dict) else {}
+                        if isinstance(pl.get("source"), dict) and "subagent" in pl["source"]:
+                            is_native_sub = True
+                    for chunk in found_chunks:
+                        cleaned = _strip_t3_boilerplate(chunk)
+                        match = T3_CHILD_PREFIX.search(cleaned)
+                        if match:
+                            return True, cleaned[match.end():]
+                        user_chunks.append(cleaned)
+                    if (is_native_sub and user_chunks) or bytes_read >= TRANSCRIPT_HEAD_MAX_BYTES:
+                        break
+        except OSError:
+            continue
+        if is_native_sub and user_chunks:
+            return True, "\n".join(user_chunks)
+
+    return is_native_sub, ""
+
+
+def _check_child_no_delegation(payload: dict, home: Path | None = None) -> dict | None:
+    is_child, body = _child_task_body(payload, home=home)
+    if not is_child:
+        return None
+    # Explicit prohibition always wins, even if the prompt mentions "subagents" in a negative clause.
+    if body and CHILD_EXPLICIT_NO_DELEGATE_RE.search(body):
+        return _deny(
+            "This delegated child/council reviewer session must not spawn subagents or child tasks. "
+            "Complete the audit directly yourself."
+        )
+    if body and CHILD_ALLOW_DELEGATE_RE.search(body):
+        return None
+    if (body and CHILD_REVIEW_ROLE_RE.search(body)) or (
+        isinstance(payload.get("subagentType"), str)
+        and payload["subagentType"].strip().lower() in ("reviewer", "adversary", "ml-reviewer", "verifier")
+    ):
+        return _deny(
+            "This delegated child/council reviewer session must not spawn subagents or child tasks. "
+            "Complete the audit directly yourself."
+        )
+    return None
+
+
+def _check_review_target_leak(payload: dict) -> dict | None:
+    texts = _extract_prompt_texts(payload.get("tool_input"))
+    if not texts:
+        return None
+    combined = "\n".join(texts)
+    if not REVIEW_DELEGATION_RE.search(combined):
+        return None
+    # Strip explicit anti-leak reminders ("do not share a target score of 9.5/10")? No—review briefs shouldn't mention target numbers at all.
+    match = TARGET_SCORE_LEAK_RE.search(combined)
+    if match:
+        return _deny(
+            f"Review/council brief leaks a numeric pass target ({match.group(0).strip()!r}). "
+            "Keep reviewers blind to target scores and pass thresholds so scoring stays unanchored; "
+            "send only the candidate, rubric anchors, and raw evidence, and compare against the target yourself."
+        )
+    return None
+
+
 def guard(payload: dict, home: Path | None = None) -> dict | None:
     if payload.get("tool_name") not in TOOLS:
         return None
     return (
-        _check_claude_fork(payload)
+        _check_child_no_delegation(payload, home=home)
+        or _check_review_target_leak(payload)
+        or _check_claude_fork(payload)
         or _check_antigravity_3p_inherit(payload)
         or _check_ultra_tier(payload, home=home)
     )

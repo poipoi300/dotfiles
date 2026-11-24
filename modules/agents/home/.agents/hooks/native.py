@@ -84,7 +84,9 @@ def canonical(provider: str, payload: dict) -> dict:
     arguments = call.get("args") if isinstance(call.get("args"), dict) else {}
     tool = ANTIGRAVITY_TOOLS.get(call.get("name"), call.get("name"))
     result = {"hook_event_name": payload.get("hookEventName"), "cwd": payload.get("cwd"),
-              "session_id": payload.get("conversationId"), "model_name": payload.get("modelName")}
+              "session_id": payload.get("conversationId"), "model_name": payload.get("modelName"),
+              "transcript_path": payload.get("transcriptPath"),
+              "last_user_input": payload.get("lastUserInput")}
     if tool == "Bash":
         result.update(tool_name=tool, tool_input={"command": arguments.get("CommandLine")},
                       cwd=shell_directory(payload.get("cwd"), arguments.get("Cwd")))
@@ -213,11 +215,11 @@ def _session_budget_is_fresh(marker: Path, now: float) -> bool:
     return isinstance(recorded, (int, float)) and not isinstance(recorded, bool) and 0 <= now - recorded < SESSION_BUDGET_REFRESH_SECONDS
 
 
-def _mid_session_budget(provider: str, payload: dict) -> str | None:
-    """Re-inject a refreshed budget/routing snapshot on delegations when the session's copy is stale."""
-    if budget is None or os.environ.get("WPO_SESSION"):
+def _mid_session_budget(provider: str, payload: dict, *, require_delegation: bool = True) -> str | None:
+    """Re-inject a refreshed budget/routing snapshot when the session's copy is stale."""
+    if budget is None or os.environ.get("WPO_SESSION") or payload.get("subagentType"):
         return None
-    if payload.get("tool_name") not in model_guard.DELEGATION_TOOLS:
+    if require_delegation and payload.get("tool_name") not in model_guard.DELEGATION_TOOLS:
         return None
     session = payload.get("session_id") or payload.get("sessionId")
     if not isinstance(session, str) or not session:
@@ -313,9 +315,14 @@ def dispatch_antigravity(payload: dict) -> dict:
     if event == "SessionStart" and budget is not None and not os.environ.get("WPO_SESSION"):
         try:
             context = budget.startup(payload.get("cwd") or str(Path.cwd()))
+            _record_session_budget_seen("antigravity", shaped)
         except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
             context = ("Usage is UNKNOWN; native snapshot unavailable. Manual refresh: "
                        "python3 -I -B ~/.agents/usage/budget.py --refresh")
+        if context:
+            return {"injectSteps": [{"systemMessage": {"systemMessage": context}}]}
+    if event == "PreInvocation":
+        context = _mid_session_budget("antigravity", shaped, require_delegation=False)
         if context:
             return {"injectSteps": [{"systemMessage": {"systemMessage": context}}]}
     return {}

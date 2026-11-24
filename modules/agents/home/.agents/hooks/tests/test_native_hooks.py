@@ -140,6 +140,98 @@ class ModelGuardTests(unittest.TestCase):
             self.assertEqual(out2["hookSpecificOutput"]["additionalContext"], "[Budget fresh]")
             self.assertEqual(startup.call_count, 2)
 
+    def test_review_target_score_leak_is_denied_while_rubric_scales_pass(self):
+        for leaky in (
+            "You are a Panel Council reviewer. Evaluate the repo; target score is 9.5/10.",
+            "Act as an independent reviewer and score the rubric until it reaches 9.0/10.",
+            "Act as an independent reviewer; must score 9.0 and passing bar is 9.0.",
+            "Council review: check if the candidate meets the 9.5/10 consensus bar.",
+            "Adversarial audit: acceptance threshold >= 9.0 across all criteria.",
+            "Council reviewer: aim for 9.5 on every criterion.",
+        ):
+            out = self.decide("mcp__t3-code__delegate_task", {"task": leaky, "target": {"model": "gpt-6.2-sol"}})
+            self.assertEqual(out.get("permissionDecision"), "deny", leaky)
+            self.assertIn("blind to target scores", out.get("permissionDecisionReason", ""))
+
+        # Blind rubric scale definitions, code/config technical numbers, and ordinary non-review tasks pass.
+        for clean in (
+            "You are a Panel Council reviewer. Score each criterion on a 0-10 scale (9-10 = excellent, 6-7 = acceptable).",
+            "Act as a reviewer for the Raft module: verify quorum consensus of 3 nodes and target: 3.12 compatibility.",
+            "Council audit: check that migration target = 0 rows affected across target of 2 files.",
+            "Implement the scoring function so test fixture reaches 9.5/10.",
+        ):
+            out = self.decide("mcp__t3-code__delegate_task", {"task": clean, "target": {"model": "gpt-6.2-sol"}})
+            self.assertNotIn("permissionDecision", out, clean)
+
+    def test_council_child_cannot_spawn_nested_subagents_while_parents_and_authorized_children_can(self):
+        # T3 delegated Claude council child transcript -> denied from calling Agent or delegate_task,
+        # including negative phrasings like "Do not spawn subagents" or "not allowed to delegate".
+        for prompt_body in (
+            "Perform an independent Panel Council audit of the repo. Do NOT delegate.",
+            "You are a Panel Council reviewer. Do not spawn subagents.",
+            "Audit this commit read-only. You are not allowed to delegate to subagents.",
+        ):
+            child_tr = self.home / "child.jsonl"
+            child_tr.write_text(json.dumps({
+                "type": "user",
+                "message": {"content": (
+                    '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n\n'
+                    + prompt_body
+                )},
+            }) + "\n", encoding="utf-8")
+            out = self.decide("Agent", {"prompt": "probe sqlite", "subagent_type": "adversary"}, transcript_path=str(child_tr))
+            self.assertEqual(out.get("permissionDecision"), "deny", prompt_body)
+            self.assertIn("must not spawn subagents", out.get("permissionDecisionReason", ""))
+
+        # Large >64 KiB developer preamble before first user message (e.g. Codex) is still detected.
+        codex_tr = self.home / "codex-child.jsonl"
+        preamble = json.dumps({"type": "response_item", "payload": {"role": "developer", "content": [{"text": "A" * 100_000}]}})
+        user_row = json.dumps({"type": "response_item", "payload": {"role": "user", "content": (
+            '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n'
+            "Code council seat: do not spawn subagents."
+        )}})
+        codex_tr.write_text(preamble + "\n" + user_row + "\n", encoding="utf-8")
+        out_codex = self.decide("spawn_agent", {"prompt": "helper"}, transcript_path=str(codex_tr))
+        self.assertEqual(out_codex.get("permissionDecision"), "deny")
+
+        # Top-level parent transcript containing T3 boilerplate is NOT blocked.
+        parent_tr = self.home / "parent.jsonl"
+        parent_tr.write_text(json.dumps({
+            "type": "user",
+            "message": {"content": (
+                "<t3_code_instructions>As a subagent or child, start no subagents.</t3_code_instructions>\n"
+                "Build this app and run a council review."
+            )},
+        }) + "\n", encoding="utf-8")
+        self.assertEqual(
+            self.decide("Agent", {"prompt": "probe sqlite", "subagent_type": "adversary"}, transcript_path=str(parent_tr)),
+            {},
+        )
+
+        # Delegated child explicitly authorized to spawn subagents is allowed.
+        coord_tr = self.home / "coord.jsonl"
+        coord_tr.write_text(json.dumps({
+            "type": "user",
+            "message": {"content": (
+                '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n\n'
+                "You are a review coordinator; you may delegate individual seats to subagents."
+            )},
+        }) + "\n", encoding="utf-8")
+        self.assertEqual(
+            self.decide("Agent", {"prompt": "audit auth", "subagent_type": "adversary"}, transcript_path=str(coord_tr)),
+            {},
+        )
+
+        # Native Claude subagent under /subagents/ running as a reviewer -> denied.
+        sub_tr = self.home / "sess/subagents/agent-1.jsonl"
+        sub_tr.parent.mkdir(parents=True)
+        sub_tr.write_text(json.dumps({
+            "type": "user",
+            "message": {"content": "Act as the review sub-agent for this diff. Read-only audit."},
+        }) + "\n", encoding="utf-8")
+        out_sub = self.decide("Agent", {"prompt": "nested", "subagent_type": "Explore"}, transcript_path=str(sub_tr))
+        self.assertEqual(out_sub["permissionDecision"], "deny")
+
 
 class NativeHookTests(unittest.TestCase):
     def setUp(self):
