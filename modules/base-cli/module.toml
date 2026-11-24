@@ -3,7 +3,7 @@ category    = "base"
 
 [packages]
 pacman = ["base", "base-devel", "sudo", "git", "github-cli", "less", "unzip", "7zip", "micro",
-          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh", "pacman-contrib",
+          "btop", "fastfetch", "efibootmgr", "ntfs-3g", "python", "gitleaks", "git-lfs", "openssh", "rsync", "pacman-contrib",
           "rebuild-detector",   # after each transaction, lists AUR and local builds linked against a library that is gone
           "fwupd",              # firmware from LVFS: fwupdmgr refresh, then fwupdmgr update
           "fd", "dust", "tealdeer", "magic-wormhole",   # tealdeer: tldr; magic-wormhole: send a file with a short code
