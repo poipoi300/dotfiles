@@ -54,6 +54,18 @@ upstream version unless the user says otherwise. Python environments, and their 
 come from each project's manager (uv or pixi, see project-setup); no extra system Python
 packages.
 
+- **aurlock approvals:** You may approve `aurlock` AUR packages — including red-flagged ones that
+  require typing the package name — **only** after an independent security audit (checksum vs
+  upstream digest, PKGBUILD/scriptlets, maintainer changes) rates the package OK. Never approve
+  without that audit, never use `pacman -U` or `yay` to bypass an `aurlock` review or missing
+  approval (Workflow step 1's urgent `pacman -S`/`yay -S` exception does not waive AUR review),
+  and never adopt an arcus `local` own build (`pkg/` in a module, listed in
+  `modules/aurlock/home/.config/aurlock/local`, e.g. `cli-proxy-api`, `antigravity-cli`) into
+  `aurlock`.
+- **Desktop apps:** Prefer native toolkits (Rust/iced, GTK4, Qt) over Electron or Tauri/WebKitGTK
+  when a native alternative exists; flag web-UI picks up front. In anything built for the user,
+  hide unsupported actions rather than showing disabled "not available on Linux" placeholders.
+
 ## Config hygiene
 
 - Read a config before copying or porting it; strip secrets, Windows paths and machine state
@@ -63,6 +75,9 @@ packages.
   theme them through the generator (user matugen templates in `niri-desktop`).
 - Match hardware by stable names (monitor make/model/serial in private config), not connector
   names that change across driver updates.
+- The desktop bar is DankMaterialShell (`dms.service`, quickshell, `~/.config/DankMaterialShell`),
+  not waybar, even if casually referred to as "waybar"; check bar plugins with
+  `dms ipc call plugins status <id>`.
 - Units that need user-supplied config get `ConditionPathExists=` so they idle instead of failing.
 - GUI and audio testing follow AGENTS.md "GUI testing": never on the user's screen or devices.
 
