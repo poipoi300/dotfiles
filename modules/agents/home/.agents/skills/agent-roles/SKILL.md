@@ -64,7 +64,14 @@ reply format are defined in `~/.agents/roles/reviewer.md`.
   replace the `reviewer` where AGENTS.md requires a review.
 - Finish on `APPROVE` for the current diff with no blocker or should open. If an
   item stays disputed after two replies, or the budget runs out, show both sides
-  in two or three lines and let the user decide. Budget end is not approval.
+  in two or three lines and let the user decide. Budget end is not approval. Only
+  when the budget ends with zero open or disputed blockers or `should`s from any
+  round, zero untested fixes, and every final-round code `blocker`/`should` fix
+  covered by a passing regression test (or direct verification for non-code
+  changes) may you recommend shipping now — and you must explicitly disclose
+  which final fixes were not re-reviewed. Never recommend shipping while a
+  `blocker`, an open `should`, a security/data-loss defect, or an untested fix
+  remains open.
 
 The `sol-loop` skill launches the reviewer and follows this section.
 
