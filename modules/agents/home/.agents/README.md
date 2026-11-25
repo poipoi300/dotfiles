@@ -254,3 +254,22 @@ five minutes and free-model catalogs for six hours; `--snapshot` uses those cach
 and the OpenCode plugin), while `--refresh` forces fresh reads. WPO's separate routing usage
 adapter (`~/.claude/hooks/usage_budget.py`) is a distinct integration: it reads the Claude Code
 and CLIProxyAPI OAuth token files and queries only `api.anthropic.com` and `chatgpt.com`.
+
+## Pruning prose
+
+Run manually on major model-generation shifts or when `AGENTS.md` crosses ~200 lines. Use a fresh
+cross-family reviewer over `AGENTS.md` and `skills/*/SKILL.md` with an explicit mandate to nominate
+deletions.
+
+- **Evidence rule (no exceptions):** Every deletion nomination MUST cite concrete evidence — either
+  (a) the exact hook, type, lint, or test `file:line` that already enforces the rule mechanically
+  (checking that its denial message carries the recovery instruction), or (b) an observed empirical
+  test showing the current model generation no longer exhibits the failure. Never nominate an
+  unenforced safety invariant (such as GUI/audio isolation, never-snooze-over-a-problem,
+  fixing-what-you-find-broken, or never-report-usage) solely for brevity or to meet a
+  percentage/line-count cut target.
+- **Refuse arbitrary cut targets:** If fewer lines qualify under the evidence rule than requested,
+  report only the evidenced deletions and stop.
+- **Burn-down trigger:** If a pruning pass produces zero valid deletions while `AGENTS.md` exceeds
+  ~250 lines of prose workarounds, evaluate a clean-slate rewrite for the current model generation
+  rather than rubber-stamping bloat.

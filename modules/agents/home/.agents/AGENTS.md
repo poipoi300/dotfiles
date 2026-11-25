@@ -90,8 +90,7 @@ Modulate paid model choice and effort using the quota snapshot's weekly pace
 (`>1x` under pace: scale up toward stronger models or higher effort; `<1x` over
 pace: scale down effort or tier and shift delegates to providers with headroom).
 Reserve ultra-tier models (≥3× standard token cost) for high-stakes judgment or
-stuck problems rather than bulk implementation or routine reviews, and include
-`[ultra: <short reason>]` in the delegated prompt when intentionally using one.
+stuck problems rather than bulk implementation or routine reviews.
 Refresh with `python3 -I -B ~/.agents/usage/budget.py --refresh` before large
 delegations. Keep model IDs, pricing, and deployment paths out of this file, and
 do not use legacy proxy shell-out routing for native T3 delegation. The user
@@ -104,8 +103,6 @@ Avoid avoidable context and turn waste:
   compound command that exits with the failure tail). Never busy-poll a running
   shell or PTY with repeated empty `write_stdin`, `wait`, or `sleep` calls
   shorter than 30 seconds.
-- Do not fork a parent transcript above 150k tokens into a native subagent; pass
-  a self-contained brief to a fresh subagent instead.
 - In orchestrator worker briefs, point to `sol-loop` and `agent-roles` (one
   review cycle per PR within the round budget, not per intermediate commit)
   rather than writing custom "recheck until APPROVE" clauses or hardcoding
