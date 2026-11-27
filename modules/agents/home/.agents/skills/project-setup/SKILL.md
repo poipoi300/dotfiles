@@ -145,8 +145,8 @@ The global instructions' "Preferred stack" lists the defaults. Choose by job:
   `.cargo/config.toml`, scripts or docs (Cargo merges repo config into every
   contributor's build, failing without sccache). Avoid overriding
   `SCCACHE_DIR` per-repo without also setting `SCCACHE_CACHE_SIZE`: the
-  default `~/.cache/sccache` symlink already points to the large partition
-  with the configured 60 GiB cap, whereas overriding `SCCACHE_DIR` alone
+  default `~/.cache/sccache` uses the configured cap (20 GiB, on the small
+  root disk), whereas overriding `SCCACHE_DIR` alone
   reverts the singleton daemon to its 10 GiB default and causes thrashing.
 - **Combining `sccache`, `incremental`, and `-Z threads`:** `sccache` always
   caches third-party dependencies (Cargo disables incremental for them), but
