@@ -24,6 +24,10 @@ from pathlib import Path
 
 BEGIN = "# BEGIN AGENT-COMMON MANAGED MCP\n"
 END = "# END AGENT-COMMON MANAGED MCP\n"
+SKILLS_BEGIN = "# BEGIN AGENT-COMMON MANAGED SKILLS\n"
+SKILLS_END = "# END AGENT-COMMON MANAGED SKILLS\n"
+CLAUDE_SKILL_CREATOR_KEY = "anthropic-skills:skill-creator"
+CODEX_SKILL_CREATOR_PATH = "~/.codex/skills/.system/skill-creator/SKILL.md"
 NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 VARIABLE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 PROVIDERS = ("claude", "codex", "antigravity", "grok")
@@ -263,6 +267,96 @@ def toml_block(servers: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _norm_codex_skill_path(raw: str, home: Path) -> str:
+    if raw.startswith("~/"):
+        return os.path.normpath(str(home / raw[2:]))
+    return os.path.normpath(raw)
+
+
+def split_managed_skills_toml(text: str) -> tuple[str, dict[str, dict], bool]:
+    """Split the optional Codex managed skills block, moving any Codex-appended tables back out."""
+    starts = list(re.finditer(r"(?m)^" + re.escape(SKILLS_BEGIN.rstrip()) + r"\r?\n", text))
+    ends = list(re.finditer(r"(?m)^" + re.escape(SKILLS_END.rstrip()) + r"\r?\n", text))
+    if not starts and not ends:
+        return text, {}, False
+    if len(starts) != 1 or len(ends) != 1 or ends[0].start() < starts[0].end():
+        raise SyncError("Codex managed skills block markers are missing or repeated")
+    before, block, after = text[:starts[0].start()], text[starts[0].end():ends[0].start()], text[ends[0].end():]
+    heads = [m.start() for m in re.finditer(r"(?m)^\[", block)]
+    ours, foreign = [block[:heads[0]] if heads else block], []
+    try:
+        if tomllib.loads(ours[0]):
+            raise SyncError("Unexpected settings in the Codex managed skills block")
+        for start, end in zip(heads, heads[1:] + [len(block)]):
+            chunk = block[start:end]
+            parsed_chunk = tomllib.loads(chunk)
+            if set(parsed_chunk) == {"skills"} and isinstance(parsed_chunk["skills"], dict) and set(parsed_chunk["skills"]) <= {"config"}:
+                ours.append(chunk)
+            else:
+                foreign.append(chunk)
+        parsed_ours = tomllib.loads("".join(ours))
+        whole = tomllib.loads(block)
+    except tomllib.TOMLDecodeError as error:
+        raise SyncError(f"Cannot split the Codex managed skills block: {error}") from None
+    ours_entries = parsed_ours.get("skills", {}).get("config", [])
+    whole_entries = whole.get("skills", {}).get("config", [])
+    if not isinstance(ours_entries, list) or ours_entries != whole_entries:
+        raise SyncError("Unexpected settings in the Codex managed skills block")
+    entries: dict[str, dict] = {}
+    for entry in ours_entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or not entry["path"].strip():
+            raise SyncError("Unexpected entry in the Codex managed skills block")
+        if entry["path"] in entries:
+            raise SyncError(f"Duplicate entry in the Codex managed skills block: {entry['path']}")
+        entries[entry["path"]] = entry
+    if not foreign:
+        return before + after, entries, True
+    moved = "".join(chunk if chunk.endswith("\n") else chunk + "\n" for chunk in foreign)
+    return before.rstrip("\r\n") + "\n\n" + moved + after, entries, True
+
+
+def codex_skills_toml_block(entries: dict[str, dict]) -> str:
+    lines = [SKILLS_BEGIN.rstrip()]
+    for path in sorted(entries):
+        entry = entries[path]
+        lines.append("[[skills.config]]")
+        for key, value in entry.items():
+            lines.append(f"{key} = {json.dumps(value, ensure_ascii=False)}")
+        lines.append("")
+    lines.append(SKILLS_END.rstrip())
+    return "\n".join(lines) + "\n"
+
+
+def _strip_managed_codex_skills(parsed: dict, managed_entries: list[dict], unmanaged: dict) -> dict:
+    """Return a copy of `parsed` with only `managed_entries` removed from `skills.config`."""
+    result = {k: v for k, v in parsed.items() if k not in ("mcp_servers", "skills")}
+    if "skills" not in parsed:
+        return result
+    if not isinstance(parsed["skills"], dict):
+        result["skills"] = parsed["skills"]
+        return result
+    skills = dict(parsed["skills"])
+    if isinstance(skills.get("config"), list):
+        remaining = list(skills["config"])
+        for managed in managed_entries:
+            try:
+                remaining.remove(managed)
+            except ValueError:
+                pass
+        unmanaged_skills = unmanaged.get("skills") if isinstance(unmanaged.get("skills"), dict) else {}
+        if remaining or "config" in unmanaged_skills:
+            skills["config"] = remaining
+        else:
+            skills.pop("config", None)
+    if skills or "skills" in unmanaged:
+        result["skills"] = skills
+    return result
+
+
+def has_shared_skill_creator(home: Path) -> bool:
+    return (home / ".agents/skills/skill-creator/SKILL.md").is_file()
+
+
 def fingerprints(values: dict) -> dict:
     return {name: fingerprint(value) for name, value in values.items()}
 
@@ -351,14 +445,35 @@ class SkillLink:
     provider: str = "claude"
 
 
+@dataclass
+class StaleSkillLink:
+    path: Path
+    target: Path
+    provider: str = "claude"
+
+
 def skill_link_roots(home: Path) -> dict[str, Path]:
-    """Where shared skills are linked, by provider. Codex and Grok scan ~/.agents/skills themselves.
+    """Where shared skills are linked, by provider.
+
+    Grok scans ~/.agents/skills itself (including per-file symlinks). Codex also scans
+    ~/.agents/skills, but ignores symlinked SKILL.md files (such as arcus's per-file
+    links), so those are linked as directory symlinks into ~/.codex/skills pointing at
+    the real skill directory where SKILL.md is a regular file.
 
     Antigravity's global skills folder is also the one T3 links into its Antigravity profile."""
-    roots = {"claude": home / ".claude/skills"}
+    roots = {"claude": home / ".claude/skills", "codex": home / ".codex/skills"}
     if provider_enabled(home, "antigravity"):
         roots["antigravity"] = home / ".gemini/config/skills"
     return roots
+
+
+def _codex_symlink_skill_target(skill: Path) -> Path | None:
+    """Return the real skill directory for Codex when SKILL.md is a per-file symlink."""
+    skill_md = skill / "SKILL.md"
+    if skill.is_symlink() or not skill_md.is_symlink():
+        return None
+    target = skill_md.resolve().parent
+    return target if (target / "SKILL.md").is_file() and not (target / "SKILL.md").is_symlink() else None
 
 
 def plan_skill_links(home: Path, problems: dict | None = None) -> list[SkillLink]:
@@ -379,20 +494,67 @@ def plan_skill_links(home: Path, problems: dict | None = None) -> list[SkillLink
     for skill in sorted(source.iterdir()):
         if not skill.is_dir() or not (skill / "SKILL.md").is_file():
             continue
-        if not NAME.fullmatch(skill.name) or skill.name in {"synced", "skill-creator", "skill-installer"}:
+        if skill.name.startswith(".") or not NAME.fullmatch(skill.name) or skill.name in {"synced", "skill-installer"}:
             raise SyncError(f"Shared skill name conflicts with runtime-managed skills: {skill.name}")
+        codex_target = _codex_symlink_skill_target(skill)
         for provider, root in roots.items():
+            if provider == "codex":
+                if codex_target is None:
+                    continue
+                target = codex_target
+            else:
+                target = skill.resolve()
             destination = root / skill.name
             if os.path.lexists(destination):
-                if not destination.exists() or not os.path.samefile(destination, skill):
+                if not destination.exists() or not os.path.samefile(destination, target):
                     error = SyncError(f"{provider.capitalize()} skill collision: {skill.name}; "
                                       "archive or reconcile the existing folder first")
                     if problems is None:
                         raise error
                     problems.setdefault(provider, error)
             else:
-                links.append(SkillLink(destination, skill.resolve(), provider))
+                links.append(SkillLink(destination, target, provider))
     return links
+
+
+def plan_stale_skill_links(
+    home: Path,
+    problems: dict | None = None,
+    *,
+    claimed_paths: set[Path] | None = None,
+) -> list[StaleSkillLink]:
+    """Dangling symlinks in provider skill folders whose target sits directly inside ~/.agents/skills
+    or one of its resolved per-file-symlink skill roots."""
+    source = home / ".agents/skills"
+    if not source.is_dir():
+        return []
+    allowed_parents = {Path(os.path.normpath(source)), source.resolve()}
+    for skill in source.iterdir():
+        if skill.is_dir():
+            codex_target = _codex_symlink_skill_target(skill)
+            if codex_target is not None:
+                allowed_parents.add(codex_target.parent)
+    stale: list[StaleSkillLink] = []
+    for provider, root in skill_link_roots(home).items():
+        if problems is not None and provider in problems:
+            continue
+        if not root.is_dir():
+            continue
+        resolved_parent = root.resolve()
+        for entry in sorted(root.iterdir()):
+            if claimed_paths and entry in claimed_paths:
+                continue
+            if not entry.is_symlink() or entry.exists():
+                continue
+            try:
+                raw_target = os.readlink(entry)
+            except OSError:
+                continue
+            cand_raw = Path(os.path.normpath(entry.parent / raw_target))
+            cand_res = Path(os.path.normpath(resolved_parent / raw_target))
+            if cand_raw.parent in allowed_parents or cand_res.parent in allowed_parents:
+                stale.append(StaleSkillLink(entry, Path(raw_target), provider))
+    return stale
 
 
 def create_skill_link(link: SkillLink) -> None:
@@ -475,31 +637,113 @@ def prepare(home: Path, registry_path: Path, problems: dict | None = None) -> tu
             if name not in prior_plugins and name in current_plugins:
                 prior_plugins[name] = fingerprint(current_plugins[name])
         new_plugins = reconcile(current_plugins, plugins, prior_plugins, "Claude plugin")
+
+        # Disable Anthropic's account-synced skill-creator when our unified shared skill-creator exists.
+        desired_overrides = {CLAUDE_SKILL_CREATOR_KEY: "off"} if has_shared_skill_creator(home) else {}
+        current_overrides = settings.get("skillOverrides", {})
+        if not isinstance(current_overrides, dict) or any(not isinstance(v, str) for v in current_overrides.values()):
+            raise SyncError("Claude skillOverrides must map skill names to strings")
+        prior_overrides = dict(state.get("claudeSkillOverrides", {}))
+        for name, desired_val in desired_overrides.items():
+            if name not in prior_overrides and current_overrides.get(name) == desired_val:
+                prior_overrides[name] = fingerprint(desired_val)
+        new_overrides = reconcile(current_overrides, desired_overrides, prior_overrides, "Claude skill override")
+
+        settings_changed = False
         if new_plugins != current_plugins:
             settings["enabledPlugins"] = new_plugins
+            settings_changed = True
+        if new_overrides != current_overrides:
+            if new_overrides:
+                settings["skillOverrides"] = new_overrides
+            else:
+                settings.pop("skillOverrides", None)
+            settings_changed = True
+        if settings_changed:
             stage(settings_path, json_bytes(settings))
-        return {"claude": fingerprints(desired_claude), "claudePlugins": fingerprints(plugins)}
+        return {
+            "claude": fingerprints(desired_claude),
+            "claudePlugins": fingerprints(plugins),
+            "claudeSkillOverrides": fingerprints(desired_overrides),
+        }
 
     def codex(stage) -> dict:
         codex_path = home / ".codex/config.toml"
-        codex_text = codex_path.read_bytes().decode("utf-8-sig") if codex_path.exists() else ""
+        codex_bytes = codex_path.read_bytes() if codex_path.exists() else None
+        codex_text = codex_bytes.decode("utf-8-sig") if codex_bytes is not None else ""
         original_toml = tomllib.loads(codex_text)
-        base, current = split_managed_toml(codex_text)
+        base_no_mcp, current_mcp = split_managed_toml(codex_text)
+        mcp_marker_present = bool(
+            re.search(r"(?m)^" + re.escape(BEGIN.rstrip()) + r"\r?\n", codex_text)
+            or re.search(r"(?m)^" + re.escape(END.rstrip()) + r"\r?\n", codex_text)
+        )
+        base, current_skills, skills_marker_present = split_managed_skills_toml(base_no_mcp)
+
         desired_codex = native_servers(registry, "codex")
-        reconciled = reconcile(current, desired_codex, state.get("codex", {}), "Codex MCP")
-        unmanaged = tomllib.loads(base).get("mcp_servers", {})
-        if set(unmanaged) & set(reconciled):
-            raise SyncError(f"Unmanaged Codex MCP name collision: {', '.join(sorted(set(unmanaged) & set(reconciled)))}")
-        # Preserve every byte outside our block on normal LF files; never serialize native settings.
-        rendered = base.rstrip("\r\n") + "\n\n" + toml_block(reconciled)
-        checked = tomllib.loads(rendered)
-        if {k: v for k, v in checked.items() if k != "mcp_servers"} != {k: v for k, v in original_toml.items() if k != "mcp_servers"}:
+        reconciled_mcp = reconcile(current_mcp, desired_codex, state.get("codex", {}), "Codex MCP")
+        unmanaged_toml = tomllib.loads(base)
+        unmanaged_mcp = unmanaged_toml.get("mcp_servers", {})
+        if set(unmanaged_mcp) & set(reconciled_mcp):
+            raise SyncError(f"Unmanaged Codex MCP name collision: {', '.join(sorted(set(unmanaged_mcp) & set(reconciled_mcp)))}")
+
+        desired_skills: dict[str, dict] = (
+            {CODEX_SKILL_CREATOR_PATH: {"path": CODEX_SKILL_CREATOR_PATH, "enabled": False}}
+            if has_shared_skill_creator(home)
+            else {}
+        )
+        unmanaged_skills_raw = unmanaged_toml.get("skills", {}).get("config", []) if isinstance(unmanaged_toml.get("skills"), dict) else []
+        if unmanaged_skills_raw and not isinstance(unmanaged_skills_raw, list):
+            raise SyncError("Codex skills.config must be an array of tables")
+        # Adopt an identical unmanaged disable entry (skip duplicating); refuse conflicting ones.
+        effective_desired_skills = dict(desired_skills)
+        for path, wanted_entry in list(effective_desired_skills.items()):
+            wanted_norm = _norm_codex_skill_path(path, home)
+            for existing in unmanaged_skills_raw:
+                if not isinstance(existing, dict) or not isinstance(existing.get("path"), str):
+                    continue
+                if _norm_codex_skill_path(existing["path"], home) != wanted_norm:
+                    continue
+                if existing.get("enabled") is False and set(existing) == {"path", "enabled"}:
+                    effective_desired_skills.pop(path, None)
+                else:
+                    raise SyncError(f"Unmanaged Codex skills.config collision: {existing['path']}")
+        reconciled_skills = reconcile(
+            current_skills, effective_desired_skills, state.get("codexDisabledSkills", {}), "Codex skills config"
+        )
+
+        # Preserve every byte outside our blocks on normal LF files; never serialize native settings.
+        blocks = []
+        if reconciled_skills:
+            blocks.append(codex_skills_toml_block(reconciled_skills))
+        if reconciled_mcp:
+            blocks.append(toml_block(reconciled_mcp))
+        stripped_base = base.rstrip("\r\n")
+        if blocks:
+            prefix = (stripped_base + "\n\n") if stripped_base else ""
+            rendered = prefix + "\n".join(blocks)
+        else:
+            rendered = (stripped_base + "\n") if stripped_base else ""
+
+        try:
+            checked = tomllib.loads(rendered)
+        except tomllib.TOMLDecodeError as error:
+            raise SyncError(f"Rendered Codex config is invalid TOML: {error}") from None
+        checked_unmanaged = _strip_managed_codex_skills(checked, list(reconciled_skills.values()), unmanaged_toml)
+        original_unmanaged = _strip_managed_codex_skills(original_toml, list(current_skills.values()), unmanaged_toml)
+        if checked_unmanaged != original_unmanaged:
             raise SyncError("Rendering would change unrelated Codex settings")
-        if {k: v for k, v in checked.get("mcp_servers", {}).items() if k not in reconciled} != unmanaged:
+        if {k: v for k, v in checked.get("mcp_servers", {}).items() if k not in reconciled_mcp} != unmanaged_mcp:
             raise SyncError("Rendering would change unmanaged Codex MCP entries")
-        if reconciled or current:
+        should_write = bool(
+            reconciled_mcp or current_mcp or mcp_marker_present
+            or reconciled_skills or current_skills or skills_marker_present
+        )
+        if should_write:
             stage(codex_path, rendered.encode("utf-8"))
-        return {"codex": fingerprints(reconciled)}
+        return {
+            "codex": fingerprints(reconciled_mcp),
+            "codexDisabledSkills": fingerprints(reconciled_skills),
+        }
 
     def antigravity(stage) -> dict:
         antigravity_path = home / ANTIGRAVITY_MCP
@@ -544,7 +788,8 @@ def prepare(home: Path, registry_path: Path, problems: dict | None = None) -> tu
         section("antigravity", antigravity)
     if provider_enabled(home, "grok"):
         section("grok", grok)
-    order = ("claude", "codex", "claudePlugins", "antigravity", "grok", "grokClaudeCompat", "grokSkillsIgnore")
+    order = ("claude", "codex", "claudePlugins", "claudeSkillOverrides", "codexDisabledSkills",
+             "antigravity", "grok", "grokClaudeCompat", "grokSkillsIgnore")
     next_state = {"version": 1, **{key: owned[key] for key in order if key in owned and (owned[key] or key in
                                                                                        ("claude", "codex", "claudePlugins"))}}
     before = state_path.read_bytes() if state_path.exists() else None
@@ -607,18 +852,32 @@ def private_backup_folder(root: Path, name: str) -> Path:
 
 
 # The sync-state keys each provider's section records.
-STATE_KEYS = {"claude": ("claude", "claudePlugins"), "codex": ("codex",), "antigravity": ("antigravity",),
-              "grok": ("grok", "grokClaudeCompat", "grokSkillsIgnore")}
+STATE_KEYS = {
+    "claude": ("claude", "claudePlugins", "claudeSkillOverrides"),
+    "codex": ("codex", "codexDisabledSkills"),
+    "antigravity": ("antigravity",),
+    "grok": ("grok", "grokClaudeCompat", "grokSkillsIgnore"),
+}
 
 
-def undo(changes: list[Change], links: list[SkillLink]) -> list[str]:
-    """Reverse completed writes and links; returns paths left alone because they changed since."""
+def undo(
+    changes: list[Change],
+    links: list[SkillLink],
+    removed_links: list[StaleSkillLink] = (),
+) -> list[str]:
+    """Reverse completed writes, created links, and removed dangling links."""
     left = []
     for link in reversed(links):
         try:
             remove_created_link(link)
         except OSError:
             left.append(str(link.path))
+    for stale in reversed(removed_links):
+        try:
+            if not os.path.lexists(stale.path):
+                stale.path.symlink_to(stale.target, target_is_directory=True)
+        except OSError:
+            left.append(str(stale.path))
     for change in reversed(changes):
         try:
             if (change.path.read_bytes() if change.path.exists() else None) != change.after:
@@ -634,17 +893,19 @@ def undo(changes: list[Change], links: list[SkillLink]) -> list[str]:
     return left
 
 
-def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list[Change | SkillLink]:
+def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list[Change | SkillLink | StaleSkillLink]:
     """Apply staged changes. With `problems`, each provider's files and links are one transaction:
     a provider that refuses or fails to write is recorded there, undone and keeps its previous
     state while the others are applied (provider startup). Without it any failure undoes all."""
     with sync_lock(home):
         # Links first: a provider whose links collide is skipped whole by prepare.
         links = plan_skill_links(home, problems)
+        stale_links = plan_stale_skill_links(home, problems, claimed_paths={link.path for link in links})
         changes, next_state, state_path = prepare(home, registry_path, problems)
         if problems:
             links = [link for link in links if link.provider not in problems]
-        if not changes and not links:
+            stale_links = [link for link in stale_links if link.provider not in problems]
+        if not changes and not links and not stale_links:
             return []
         backup = private_backup_folder(home / ".agents/backups", datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ"))
         manifest = []
@@ -655,7 +916,14 @@ def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list
             if change.before is not None:
                 write_private(backup / saved, change.before)
             manifest.append({"path": str(change.path), "backup": saved if change.before is not None else None})
-        write_private(backup / "manifest.json", json_bytes({"files": manifest, "createdLinks": [{"path": str(link.path), "target": str(link.target)} for link in links]}))
+        write_private(
+            backup / "manifest.json",
+            json_bytes({
+                "files": manifest,
+                "createdLinks": [{"path": str(link.path), "target": str(link.target)} for link in links],
+                "removedLinks": [{"path": str(link.path), "target": str(link.target)} for link in stale_links],
+            }),
+        )
         native = [change for change in changes if change.provider is not None]
         prepared_state = state_path.read_bytes() if state_path.exists() else None
         prior_state = read_json(state_path)
@@ -681,11 +949,19 @@ def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list
                 refuse(provider, error)
             native = [change for change in native if change.provider not in shared]
             links = [link for link in links if link.provider not in shared]
+            stale_links = [link for link in stale_links if link.provider not in shared]
         written: list[Change] = []
         created: list[SkillLink] = []
-        for provider in dict.fromkeys([change.provider for change in native] + [link.provider for link in links]):
+        removed: list[StaleSkillLink] = []
+        providers_order = dict.fromkeys(
+            [change.provider for change in native]
+            + [link.provider for link in links]
+            + [link.provider for link in stale_links]
+        )
+        for provider in providers_order:
             done: list[Change] = []
             done_links: list[SkillLink] = []
+            done_removed: list[StaleSkillLink] = []
             try:
                 for change in (change for change in native if change.provider == provider):
                     # Recheck immediately before replacement as native harnesses may save settings.
@@ -696,10 +972,14 @@ def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list
                 for link in (link for link in links if link.provider == provider):
                     create_skill_link(link)  # a read-only skills folder fails here
                     done_links.append(link)
+                for stale in (link for link in stale_links if link.provider == provider):
+                    if stale.path.is_symlink() and not stale.path.exists():
+                        stale.path.unlink()
+                        done_removed.append(stale)
             except (SyncError, ValueError, OSError) as error:
-                left = undo(done, done_links)
+                left = undo(done, done_links, done_removed)
                 if problems is None:
-                    left += undo(written, created)
+                    left += undo(written, created, removed)
                     if left:
                         raise SyncError(f"Write failed; concurrent edits left untouched in {', '.join(left)}. Original backups: {backup}") from error
                     raise
@@ -707,6 +987,7 @@ def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list
                 continue
             written += done
             created += done_links
+            removed += done_removed
         try:
             before = state_path.read_bytes() if state_path.exists() else None
             if before != prepared_state:
@@ -715,9 +996,9 @@ def apply(home: Path, registry_path: Path, problems: dict | None = None) -> list
                 atomic_write(state_path, json_bytes(next_state))
                 written.append(Change(state_path, before, json_bytes(next_state)))
         except Exception:
-            undo([change for change in written if change.path != state_path], created)
+            undo([change for change in written if change.path != state_path], created, removed)
             raise
-        return [*written, *created]
+        return [*written, *created, *removed]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -730,9 +1011,18 @@ def main(argv: list[str] | None = None) -> int:
     home = args.home.resolve()
     registry = args.registry or home / ".agents/mcp.json"
     try:
-        changes = [*prepare(home, registry)[0], *plan_skill_links(home)] if args.command == "check" or args.dry_run else apply(home, registry)
+        if args.command == "check" or args.dry_run:
+            planned_links = plan_skill_links(home)
+            planned_stale = plan_stale_skill_links(home, claimed_paths={link.path for link in planned_links})
+            changes = [*prepare(home, registry)[0], *planned_links, *planned_stale]
+        else:
+            changes = apply(home, registry)
         for change in changes:
-            print(f"{'would update' if args.command == 'check' or args.dry_run else 'updated'}: {change.path}")
+            if isinstance(change, StaleSkillLink):
+                verb = "would remove dangling link" if args.command == "check" or args.dry_run else "removed dangling link"
+            else:
+                verb = "would update" if args.command == "check" or args.dry_run else "updated"
+            print(f"{verb}: {change.path}")
         if not changes:
             print("Shared MCP configuration and skill links are current.")
         return 1 if changes and args.command == "check" else 0

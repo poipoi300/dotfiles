@@ -287,6 +287,197 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("not refreshed", stderr.getvalue())
 
+    def _add_shared_skill_creator(self):
+        skill = self.home / ".agents/skills/skill-creator"
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text("---\nname: skill-creator\ndescription: When the user asks to write or test a skill.\n---\n")
+        return skill
+
+    def test_shared_skill_creator_links_and_reserved_names_stay_rejected(self):
+        (self.home / ".gemini").mkdir()
+        skill = self._add_shared_skill_creator()
+        sync.apply(self.home, self.registry)
+        self.assertTrue((self.home / ".claude/skills/skill-creator").samefile(skill))
+        self.assertTrue((self.home / ".gemini/config/skills/skill-creator").samefile(skill))
+        for reserved in ("synced", "skill-installer"):
+            bad = self.home / ".agents/skills" / reserved
+            bad.mkdir(parents=True)
+            (bad / "SKILL.md").write_text("---\nname: x\ndescription: x\n---\n")
+            with self.assertRaisesRegex(sync.SyncError, "conflicts with runtime-managed"):
+                sync.plan_skill_links(self.home)
+            import shutil
+            shutil.rmtree(bad)
+
+    def test_claude_skill_creator_override_coexists_with_plugins_adopts_detects_drift_and_removes(self):
+        settings = self.home / ".claude/settings.json"
+        settings.write_text(json.dumps({
+            "hooks": {"keep": []},
+            "enabledPlugins": {"context7@official": True, "other": True},
+            "skillOverrides": {"custom:keep": "on"},
+        }))
+        self.registry.write_text(json.dumps({
+            "mcpServers": {"sample": {"command": "sample", "args": []}},
+            "claudePluginOverrides": {"context7@official": False},
+        }))
+        skill = self._add_shared_skill_creator()
+        sync.apply(self.home, self.registry)
+        data = self.load(settings)
+        self.assertEqual(data["enabledPlugins"], {"context7@official": False, "other": True})
+        self.assertEqual(data["skillOverrides"], {"custom:keep": "on", sync.CLAUDE_SKILL_CREATOR_KEY: "off"})
+        self.assertEqual(sync.prepare(self.home, self.registry)[0], [])
+
+        # External drift is refused.
+        data["skillOverrides"][sync.CLAUDE_SKILL_CREATOR_KEY] = "on"
+        settings.write_text(json.dumps(data))
+        with self.assertRaisesRegex(sync.SyncError, "Drift"):
+            sync.prepare(self.home, self.registry)
+        data["skillOverrides"][sync.CLAUDE_SKILL_CREATOR_KEY] = "off"
+        settings.write_text(json.dumps(data))
+
+        # Removing shared skill-creator removes only our owned override.
+        (skill / "SKILL.md").unlink()
+        sync.apply(self.home, self.registry)
+        self.assertEqual(self.load(settings)["skillOverrides"], {"custom:keep": "on"})
+
+        # Pre-existing conflicting "on" is refused; identical "off" is adopted.
+        (skill / "SKILL.md").write_text("---\nname: skill-creator\ndescription: x\n---\n")
+        current = self.load(settings)
+        current["skillOverrides"] = {sync.CLAUDE_SKILL_CREATOR_KEY: "on"}
+        settings.write_text(json.dumps(current))
+        with self.assertRaisesRegex(sync.SyncError, "collides"):
+            sync.prepare(self.home, self.registry)
+        current["skillOverrides"] = {sync.CLAUDE_SKILL_CREATOR_KEY: "off"}
+        settings.write_text(json.dumps(current))
+        sync.apply(self.home, self.registry)
+        self.assertEqual(self.load(settings)["skillOverrides"], {sync.CLAUDE_SKILL_CREATOR_KEY: "off"})
+
+    def test_codex_skill_creator_disable_block_lifecycle_invariance_and_conflicts(self):
+        # Preserve unmanaged [skills] keys and unmanaged [[skills.config]] entries.
+        self.codex.write_text(
+            self.prefix
+            + '\n[skills]\nextra = true\n\n[[skills.config]]\npath = "~/.codex/skills/other/SKILL.md"\nenabled = true\n'
+        )
+        skill = self._add_shared_skill_creator()
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        self.assertIn(sync.SKILLS_BEGIN, text)
+        self.assertIn(sync.BEGIN, text)
+        self.assertLess(text.index(sync.SKILLS_BEGIN), text.index(sync.BEGIN))
+        parsed = tomllib.loads(text)
+        self.assertTrue(parsed["skills"]["extra"])
+        self.assertEqual(len(parsed["skills"]["config"]), 2)
+        self.assertEqual(sync.prepare(self.home, self.registry)[0], [])
+
+        # Foreign table appended inside SKILLS block is moved out and kept.
+        appended = '[hooks.state."/y/hooks.json:stop:0:0"]\ntrusted_hash = "def"\n'
+        self.codex.write_text(text.replace(sync.SKILLS_END, appended + sync.SKILLS_END))
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        self.assertIn(appended, text[:text.index(sync.SKILLS_BEGIN)])
+        self.assertEqual(tomllib.loads(text)["hooks"]["state"]["/y/hooks.json:stop:0:0"], {"trusted_hash": "def"})
+
+        # Removing skill-creator removes only the SKILLS block and keeps unmanaged [skills].
+        (skill / "SKILL.md").unlink()
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        self.assertNotIn(sync.SKILLS_BEGIN, text)
+        self.assertIn(sync.BEGIN, text)
+        parsed = tomllib.loads(text)
+        self.assertTrue(parsed["skills"]["extra"])
+        self.assertEqual(parsed["skills"]["config"], [{"path": "~/.codex/skills/other/SKILL.md", "enabled": True}])
+
+        # Also works cleanly when config had NO unmanaged [skills] at all and NO MCP registry.
+        self.registry.write_text(json.dumps({"mcpServers": {}}))
+        self.codex.write_text(self.prefix)
+        (self.home / ".agents/state/sync-state.json").unlink()
+        (skill / "SKILL.md").write_text("---\nname: skill-creator\ndescription: x\n---\n")
+        sync.apply(self.home, self.registry)
+        text = self.codex.read_text()
+        self.assertIn(sync.SKILLS_BEGIN, text)
+        self.assertNotIn(sync.BEGIN, text)
+        (skill / "SKILL.md").unlink()
+        sync.apply(self.home, self.registry)
+        self.assertEqual(self.codex.read_text(), self.prefix)
+
+        # Unmanaged identical disable (even with expanded home path) is adopted; conflicting enabled=true is refused.
+        expanded = str(self.home / ".codex/skills/.system/skill-creator/SKILL.md")
+        (skill / "SKILL.md").write_text("---\nname: skill-creator\ndescription: x\n---\n")
+        self.codex.write_text(self.prefix + f'\n[[skills.config]]\npath = {json.dumps(expanded)}\nenabled = true\n')
+        with self.assertRaisesRegex(sync.SyncError, "collision"):
+            sync.prepare(self.home, self.registry)
+        self.codex.write_text(self.prefix + f'\n[[skills.config]]\npath = {json.dumps(expanded)}\nenabled = false\n')
+        sync.apply(self.home, self.registry)
+        self.assertNotIn(sync.SKILLS_BEGIN, self.codex.read_text())
+
+    def test_stale_skill_links_pruned_reported_and_restored_on_rollback(self):
+        (self.home / ".gemini/config/skills").mkdir(parents=True)
+        (self.home / ".claude/skills").mkdir(parents=True)
+        # Missing ~/.agents/skills must never trigger pruning.
+        dangling_claude = self.home / ".claude/skills/old-skill"
+        dangling_claude.symlink_to(self.home / ".agents/skills/old-skill")
+        self.assertEqual(sync.plan_stale_skill_links(self.home), [])
+
+        # Once ~/.agents/skills exists, broken absolute and relative links pointing into it are pruned.
+        (self.home / ".agents/skills").mkdir(parents=True)
+        dangling_agy = self.home / ".gemini/config/skills/old-rel"
+        dangling_agy.symlink_to(Path("../../../.agents/skills/old-rel"))
+        unrelated_dangling = self.home / ".claude/skills/external-broken"
+        unrelated_dangling.symlink_to(self.home / "somewhere-else/missing")
+        real_dir = self.home / ".claude/skills/custom-local"
+        real_dir.mkdir()
+        live_skill = self.home / ".agents/skills/live-skill"
+        live_skill.mkdir()
+        (live_skill / "SKILL.md").write_text("---\nname: live-skill\ndescription: x\n---\n")
+
+        planned = sync.plan_stale_skill_links(self.home)
+        self.assertEqual({s.path for s in planned}, {dangling_claude, dangling_agy})
+
+        # Rollback restores removedLinks cleanly after removing created links.
+        dangling_claude.unlink()
+        sync.undo([], [], [sync.StaleSkillLink(dangling_claude, self.home / ".agents/skills/old-skill", "claude")])
+        self.assertTrue(os.path.lexists(dangling_claude))
+        self.assertTrue(dangling_claude.is_symlink())
+
+        # Full apply prunes owned dangling links, records them in manifest, and leaves unrelated/real entries untouched.
+        sync.apply(self.home, self.registry)
+        self.assertFalse(os.path.lexists(dangling_claude))
+        self.assertFalse(os.path.lexists(dangling_agy))
+        self.assertTrue(os.path.lexists(unrelated_dangling))
+        self.assertTrue(real_dir.is_dir())
+        self.assertTrue((self.home / ".claude/skills/live-skill").samefile(live_skill))
+        manifest = self.load(sorted((self.home / ".agents/backups").glob("*/manifest.json"))[-1])
+        self.assertEqual({entry["path"] for entry in manifest["removedLinks"]}, {str(dangling_claude), str(dangling_agy)})
+
+    def test_codex_directory_links_created_for_per_file_symlinked_skills_and_pruned_when_stale(self):
+        # Simulate arcus per-file symlinks: real directory in ~/.agents/skills/<name>,
+        # with SKILL.md symlinked into a dotfiles source directory containing regular files.
+        repo_skills = self.home / "dotfiles-skills"
+        real_skill = repo_skills / "arcus-skill"
+        real_skill.mkdir(parents=True)
+        (real_skill / "SKILL.md").write_text("---\nname: arcus-skill\ndescription: Arcus skill.\n---\n")
+        deployed = self.home / ".agents/skills/arcus-skill"
+        deployed.mkdir(parents=True)
+        (deployed / "SKILL.md").symlink_to(real_skill / "SKILL.md")
+
+        # Regular (non-symlinked) SKILL.md is discovered natively by Codex and gets no ~/.codex/skills link.
+        regular_skill = self.home / ".agents/skills/regular-skill"
+        regular_skill.mkdir(parents=True)
+        (regular_skill / "SKILL.md").write_text("---\nname: regular-skill\ndescription: Regular.\n---\n")
+
+        sync.apply(self.home, self.registry)
+        codex_link = self.home / ".codex/skills/arcus-skill"
+        self.assertTrue(codex_link.is_symlink())
+        self.assertTrue(codex_link.samefile(real_skill))
+        self.assertFalse(os.path.lexists(self.home / ".codex/skills/regular-skill"))
+        self.assertEqual(sync.plan_skill_links(self.home), [])
+
+        # Dangling Codex link pointing into the same resolved dotfiles skills root is pruned.
+        stale_codex = self.home / ".codex/skills/renamed-skill"
+        stale_codex.symlink_to(repo_skills / "renamed-skill")
+        self.assertEqual({s.path for s in sync.plan_stale_skill_links(self.home)}, {stale_codex})
+        sync.apply(self.home, self.registry)
+        self.assertFalse(os.path.lexists(stale_codex))
+
 
 if __name__ == "__main__":
     unittest.main()
