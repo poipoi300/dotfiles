@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: Coordinate multi-agent, multi-issue, or parallel-PR implementation batches across worktrees, builders, cross-family reviewers, slow verification gates, and periodic batch monitoring (acting as an agent orchestrator). Not for a single direct coding task or a single code review.
+description: Use when delegating multiple implementation tasks, working through a list or milestone of issues in parallel, or running a multi-PR wave across worktrees. Also use when asked to orchestrate worker agents, manage parallel builders and merge order, or supervise a long batch. Covers PR sizing, disjoint waves, contract-first stacking, slow-gate handoffs, single cross-family review loops, and batch monitoring and cleanup. Not for a single coding task or one-off subagent. Review loops and briefs are sol-loop and agent-roles; issues are project-management; commits and PRs are vcs.
 ---
 
 # Orchestration
