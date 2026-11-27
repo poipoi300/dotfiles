@@ -139,10 +139,20 @@ the coverage line.
 Launch every seat at once, the blind seat in its first phase. Every other seat
 gets the path of [seats.md](seats.md) and its seat name, the absolute path of
 `C/intent.md`, the repository path, `C/trees/trees.json`, the setup commands, its
-worktree path `C/worktrees/<seat>`, and its remaining time and quota.
+worktree path `C/worktrees/<seat>`, and its remaining time and quota. Write that
+worktree path out in full (absolute, outside the repository): a seat that
+resolves it against the repository creates the worktree inside it, and the next
+`materialize` then fails on an untracked entry. When the project uses a shared
+test database or other shared state, give each seat its own for exploring, so
+concurrent seats and any still-running runner from an earlier round do not
+interfere.
 
 Each seat returns one JSON object in a fenced block. Save the object without the
-fence as `C/entries/<seat>.json` and check it:
+fence as `C/entries/<seat>.json` and check it. When a seat ran as a background
+agent whose completion notification carries the result (its output file can be
+empty), take the object from the notification and unescape any HTML entities
+(`&lt;`, `&gt;`, `&amp;`) back into characters, or quotes and patches stop
+matching:
 
 ```sh
 python3 -I -B $S/witness.py validate --trees $C/trees --entries $C/entries/<seat>.json

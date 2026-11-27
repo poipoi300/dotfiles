@@ -12,8 +12,9 @@ candidate against the intent in `intent.md`, through your seat's lens only;
 other seats cover the rest.
 
 - The user's checkout and the council's trees are read-only. To run code, make
-  your own worktree at the path the orchestrator gives you, from the candidate
-  snapshot named in `trees.json`
+  your own worktree at the absolute path outside the repository that the
+  orchestrator gives you (never a relative path, which `git -C <repo>` resolves
+  inside the repository), from the candidate snapshot named in `trees.json`
   (`git -C <repo> worktree add --detach <path> <candidate_snapshot>`; the base is
   `base_sha`). Run the setup commands you were given there before anything else,
   and remove the worktree when you finish
