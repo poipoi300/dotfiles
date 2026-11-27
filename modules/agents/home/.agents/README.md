@@ -2,8 +2,10 @@
 
 Edit shared skills through `~/.agents/skills/`, and MCP definitions in `~/.agents/mcp.json`.
 The same physical skill files are visible through Claude's and Antigravity's native skills
-directories (links) and Codex's and Grok's native `.agents/skills` discovery. There is no
-copied library to keep in sync. The module README covers how Antigravity and Grok are wired.
+directories (links), Grok's native `.agents/skills` discovery, and Codex's `.codex/skills`
+directory links (Codex ignores per-file symlinked `SKILL.md` files under `~/.agents/skills`,
+so `sync.py` links each such skill directory to its real source directory in `~/.codex/skills`).
+There is no copied library to keep in sync. The module README covers how Antigravity and Grok are wired.
 
 `~/.agents/AGENTS.md` is the common instruction source, linked into the providers' native
 global instruction paths. Project `AGENTS.md` files remain project-owned. Changing shared
@@ -83,7 +85,9 @@ credential values. Backups can contain private native configuration: keep `backu
 ## Skill sources and exclusions
 
 Editable skills live in `~/.agents/skills/`; `sync.py` links each one into `~/.claude/skills/`
-(Codex discovers `~/.agents/skills` natively). WPO stays in its independently maintained
+and `~/.gemini/config/skills/`, and links per-file symlinked skills (such as arcus deployments)
+as directory symlinks into `~/.codex/skills/` so Codex discovers them cleanly (Grok follows
+per-file symlinks in `~/.agents/skills/` natively). WPO stays in its independently maintained
 repository and is linked into the common root; its source is not part of this tree.
 
 On 2026-11-12 these were removed: Graphify (not useful); `daily-brief` and `frontend-design`
@@ -96,10 +100,15 @@ their contents and attributes were not changed. Their paths are excluded from pu
 Their tools may still require packages or workflow adaptation when used outside Claude.
 
 Claude-hosted `chrome-browser`, `computer-use`, `docs`, and `import-memory` remain Claude-only
-pending tool adaptation. The account-synced `skill-creator`
-stays Claude-only to avoid shadowing Codex's bundled `skill-creator`. `skill-pressure-testing`
-(formerly `writing-skills`) is only for explicitly requested test-first pressure testing; ordinary
-creation uses the runtime's own authoring skill.
+pending tool adaptation. Shared `skill-creator` unifies `skill-pressure-testing` (MIT, Obra
+`writing-skills`) with curated eval/scaffolding/validation tooling from Anthropic's and Codex's
+`skill-creator` skills (Apache-2.0; see `skills/skill-creator/NOTICE` and licenses beside it).
+When `~/.agents/skills/skill-creator/SKILL.md` is present, `sync.py` disables both native copies
+non-destructively (`skillOverrides["anthropic-skills:skill-creator"] = "off"` in
+`~/.claude/settings.json` and a `# BEGIN/END AGENT-COMMON MANAGED SKILLS` block with
+`[[skills.config]]` disabling `~/.codex/skills/.system/skill-creator/SKILL.md` in
+`~/.codex/config.toml`, tracked for drift) and prunes owned dangling symlinks left behind by
+renamed/removed shared skills.
 On 2026-11-15 six PR-workflow skills were imported from tstack (MIT, upstream commit in each
 skill's `metadata.source`, license copied beside it): `file-pr`, `babysit-pr` (with its
 `pr-wait` script), `leaving-pr-comments`, `sol-loop`, `full-send`, and `full-stop`. On 2026-11-18
@@ -166,6 +175,7 @@ python3 -I -B -m unittest discover -s ~/.agents/tests
 python3 -I -B -m unittest discover -s ~/.agents/hooks/tests
 python3 -I -B -m unittest discover -s ~/.agents/usage/tests   # private module only
 python3 -I -B -m unittest discover -s ~/.agents/skills/orchestration/tests
+python3 -I -B -m unittest discover -s ~/.agents/skills/skill-creator/tests
 python3 ~/.agents/skills/humanizer/tests/test_checker.py
 uv run ~/.agents/skills/council/tests/test_garble.py
 python3 -I -B ~/.agents/skills/council/tests/test_witness.py

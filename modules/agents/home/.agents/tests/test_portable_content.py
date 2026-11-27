@@ -108,27 +108,33 @@ class InstalledContentTests(unittest.TestCase):
                 claude = HOME / ".claude/skills" / shared.parent.name / "SKILL.md"
                 self.assertTrue(claude.is_file(), "run launch.py sync to link the shared skills into Claude")
                 self.assertTrue(shared.samefile(claude))
+                if not shared.parent.is_symlink() and shared.is_symlink():
+                    codex = HOME / ".codex/skills" / shared.parent.name / "SKILL.md"
+                    self.assertTrue(codex.is_file(), "run launch.py sync to link per-file symlinked skills into Codex")
+                    self.assertTrue(shared.samefile(codex))
 
-    def test_new_skills_are_discoverable_without_shadowing_native_skill_creator(self):
-        for name in ("agent-roles", "research-report"):
+    def test_shared_skill_creator_and_core_skills_are_discoverable(self):
+        for name in ("agent-roles", "research-report", "skill-creator", "orchestration"):
             metadata, body = frontmatter(SKILLS / name / "SKILL.md")
             self.assertEqual(metadata["name"], name)
             self.assertTrue(metadata["description"])
             self.assertLess(len(metadata["description"]), 1024)
             self.assertTrue(body)
             self.assertNotIn("disable-model-invocation", metadata)
-        self.assertFalse((SKILLS / "skill-creator").exists())
+        skill_creator_meta, _ = frontmatter(SKILLS / "skill-creator/SKILL.md")
+        self.assertEqual(skill_creator_meta["description"], "When the user asks to write or test a skill.")
+        self.assertFalse((SKILLS / "skill-pressure-testing").exists())
 
-    @unittest.skipUnless((HOME / ".codex/skills/.system/skill-creator/scripts/quick_validate.py").is_file(),
-                         "Codex's bundled skill-creator is not installed")
-    def test_owned_skill_core_metadata_passes_native_quick_validation(self):
-        validator = load_module("native_skill_validator", HOME / ".codex/skills/.system/skill-creator/scripts/quick_validate.py")
+    def test_owned_skill_core_metadata_passes_quick_validation(self):
+        validator = load_module("shared_skill_validator", SKILLS / "skill-creator/scripts/quick_validate.py")
         names = (
             "agent-roles", "research-report", "building-runner-tuis", "coding",
-            "designing-tuis", "gauntlet-loop", "humanizer",
-            "image-generation", "ml-design", "reverse-engineer-anything", "sillytavern-local",
-            "systematic-debugging", "vcs", "skill-pressure-testing", "council", "correct", "bro", "benchmark-checklist", "hillclimb",
-            "statechart", "create-verification-skill", "maintain-verification-skill",
+            "designing-tuis", "forge", "full-send", "full-stop", "gauntlet-loop", "humanizer",
+            "image-generation", "ml-design", "orchestration", "project-management", "project-setup",
+            "reverse-engineer-anything", "sillytavern-local", "skill-creator", "sol-loop",
+            "systematic-debugging", "system-changes", "vcs", "council", "correct", "bro",
+            "benchmark-checklist", "hillclimb", "statechart", "create-verification-skill",
+            "maintain-verification-skill",
         )
         for name in names:
             if not (SKILLS / name).is_dir():
@@ -144,6 +150,9 @@ class InstalledContentTests(unittest.TestCase):
 
     def test_referenced_shared_role_and_local_markdown_paths_exist(self):
         files = [*ROLES.glob("*.md"), SKILLS / "agent-roles/SKILL.md", SKILLS / "humanizer/SKILL.md",
+                 SKILLS / "skill-creator/SKILL.md",
+                 *list((SKILLS / "skill-creator/references").glob("*.md")),
+                 *list((SKILLS / "skill-creator/agents").glob("*.md")),
                  SKILLS / "impeccable/reference/new-work.md", SKILLS / "impeccable/reference/new-work-comp.md",
                  SKILLS / "impeccable/reference/animate.md", SKILLS / "impeccable/reference/live.md",
                  *list((SKILLS / "impeccable/reference/degraded").glob("*.md"))]

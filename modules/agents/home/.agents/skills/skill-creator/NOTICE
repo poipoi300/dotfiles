@@ -1,0 +1,43 @@
+skill-creator — Unified Agent Skill Authoring & Testing Skill
+
+This skill synthesizes and adapts material from three upstream open-source works:
+
+1. Obra Superpowers — writing-skills (MIT License; see LICENSE-MIT.txt)
+   Copyright (c) 2025 Jesse Vincent
+   - Pressure-testing methodology (`references/pressure-testing.md`, adapted from
+     `testing-skills-with-subagents.md`), persuasion principles
+     (`references/persuasion-principles.md`), SDO trigger-only description rules,
+     "Match the Form to the Failure", and wording micro-testing in `SKILL.md`.
+
+2. Anthropic — skill-creator (Apache License 2.0; see LICENSE-Apache-2.0.txt)
+   - Eval workflow, subagent briefs (`agents/grader.md`, `agents/comparator.md`,
+     `agents/analyzer.md`), schemas (`references/schemas.md`), benchmark aggregator
+     (`scripts/aggregate_benchmark.py`), and static HTML eval viewer
+     (`eval-viewer/generate_review.py`, `eval-viewer/viewer.html`).
+
+3. OpenAI Codex — .system/skill-creator (Apache License 2.0; see LICENSE-Apache-2.0.txt)
+   - Portable skill scaffolding (`scripts/init_skill.py`), frontmatter validator
+     (`scripts/quick_validate.py`), and opt-in Codex UI metadata generator and
+     reference (`scripts/generate_openai_yaml.py`, `references/openai_yaml.md`).
+
+Summary of local modifications (Apache License 2.0 §4(b)):
+- `SKILL.md`: unified cross-provider authoring workflow (with sibling-skill
+  inspiration survey, trigger-only description discipline, risk-matched 3-mode
+  testing, and local `~/.agents/skills/` deployment checklist); removed single-
+  provider Claude.ai/Cowork and Claude-CLI-only optimizer workflows.
+- `scripts/quick_validate.py`: merged Codex's 5-key allowlist and fenced-TODO
+  checks with Anthropic's single-root `SKILL.md` check (relative-path safe),
+  explicit `disable-model-invocation` guidance, and explicit UTF-8 I/O.
+- `scripts/init_skill.py`: made sibling import `-I -B`-safe, made
+  `agents/openai.yaml` generation opt-in (`--openai-yaml`), updated description
+  placeholder to trigger-only phrasing, and enforced UTF-8 LF output.
+- `scripts/generate_openai_yaml.py` & `scripts/aggregate_benchmark.py`: enforced
+  explicit UTF-8 file I/O.
+- `eval-viewer/generate_review.py`: removed `webbrowser.open()` and `_kill_port()`,
+  defaulted to static HTML generation (`<workspace>/review.html`), kept opt-in
+  `--serve` bound to `127.0.0.1`, and enforced UTF-8 I/O.
+- `references/schemas.md`: removed dropped `history.json` optimizer schema,
+  annotated `claude plugin eval` as an optional runner, and scoped to Mode B.
+- `references/pressure-testing.md`: normalized to LF, removed dropped
+  `examples/CLAUDE_MD_TESTING.md` link, updated sibling `persuasion-principles.md`
+  link, and scoped TDD Iron Law to Mode C discipline skills.

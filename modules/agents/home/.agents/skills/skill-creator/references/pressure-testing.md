@@ -1,18 +1,16 @@
-# Testing Skills With Subagents
+# Pressure Testing Discipline Skills With Subagents
 
-**Load this reference when:** creating or editing skills, before deployment, to verify they work under pressure and resist rationalization.
+**Load this reference for Mode C (discipline / guardrail skills):** creating or editing skills whose rules agents have an incentive to rationalize around under pressure. For narrow/reference skills or artifact workflows, use Mode A or Mode B in [../SKILL.md](../SKILL.md) instead.
 
 ## Overview
 
-**Testing skills is just TDD applied to process documentation.**
+**Testing discipline skills is TDD applied to process documentation.**
 
 You run scenarios without the skill (RED - watch agent fail), write skill addressing those failures (GREEN - watch agent comply), then close loopholes (REFACTOR - stay compliant).
 
 **Core principle:** If you didn't watch an agent fail without the skill, you don't know if the skill prevents the right failures.
 
-**REQUIRED BACKGROUND:** This applies the RED-GREEN-REFACTOR cycle to skills: watch the agent fail without the skill (RED), write the skill until it complies (GREEN), close loopholes (REFACTOR). This document provides skill-specific test formats (pressure scenarios, rationalization tables).
-
-**Complete worked example:** See examples/CLAUDE_MD_TESTING.md for a full test campaign testing CLAUDE.md documentation variants.
+**REQUIRED BACKGROUND:** This applies the RED-GREEN-REFACTOR cycle to discipline skills: watch the agent fail without the skill (RED), write the skill until it complies (GREEN), close loopholes (REFACTOR). This document provides skill-specific test formats (pressure scenarios, rationalization tables).
 
 ## When to Use
 
@@ -139,7 +137,7 @@ Forces explicit choice.
 
 **Best tests combine 3+ pressures.**
 
-**Why this works:** See persuasion-principles.md (in this skill's directory) for research on how authority, scarcity, and commitment principles increase compliance pressure.
+**Why this works:** See [persuasion-principles.md](persuasion-principles.md) for research on how authority, scarcity, and commitment principles increase compliance pressure.
 
 ### Key Elements of Good Scenarios
 
