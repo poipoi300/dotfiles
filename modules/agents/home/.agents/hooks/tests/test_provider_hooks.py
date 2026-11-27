@@ -91,7 +91,10 @@ class GrokTests(unittest.TestCase):
             _seed_rates(home)
             nested = {"tool_name": "t3-code__delegate_task",
                       "tool_input": {"task": "x", "target": {"providerInstanceId": "claudeAgent", "model": "claude-fable-5-2"}}}
-            with patch.object(Path, "home", return_value=home), patch.object(model_guard, "routing", None):
+            healthy = {"mem_avail_gib": 32.0, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 24.0, "shm_total_gib": 46.0}
+            with patch.object(Path, "home", return_value=home), \
+                 patch.object(model_guard, "routing", None), \
+                 patch.object(model_guard, "_host_resources", return_value=healthy):
                 output = native.dispatch("grok", grok("t3-code__delegate_task", nested))
                 self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
                 self.assertIn("[ultra:", output["hookSpecificOutput"]["permissionDecisionReason"])
@@ -223,7 +226,10 @@ class AntigravityTests(unittest.TestCase):
             _seed_rates(home)
             delegate = antigravity("mcp_t3-code_delegate_task", {"task": "x", "toolSummary": "s",
                                                                  "target": {"model": "claude-fable-5-2"}})
-            with patch.object(Path, "home", return_value=home), patch.object(model_guard, "routing", None):
+            healthy = {"mem_avail_gib": 32.0, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 24.0, "shm_total_gib": 46.0}
+            with patch.object(Path, "home", return_value=home), \
+                 patch.object(model_guard, "routing", None), \
+                 patch.object(model_guard, "_host_resources", return_value=healthy):
                 res = native.dispatch("antigravity", delegate)
                 self.assertEqual(res["decision"], "deny")
                 self.assertIn("[ultra:", res["reason"])

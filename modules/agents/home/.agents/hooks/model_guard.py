@@ -19,6 +19,7 @@ import os
 import re
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(os.path.abspath(__file__)).parent.parent
@@ -39,6 +40,7 @@ MIN_ANY_MEM_GIB = 3.0
 MIN_ROOT_DISK_GIB = 6.0
 MIN_SHM_GIB = 4.0
 MIN_SHM_TOTAL_GIB = 8.0
+ACTIVE_RUN_MAX_IDLE_SECONDS = 12 * 3600
 COMPILED_MARKERS = ("Cargo.toml", "CMakeLists.txt", "meson.build", "go.mod", "build.zig")
 TRANSCRIPT_TAIL_BYTES = 131_072
 TRANSCRIPT_HEAD_MAX_BYTES = 1024 * 1024
@@ -76,6 +78,16 @@ REVIEW_TITLE_RE = re.compile(
 )
 REVIEW_SLUG_RE = re.compile(
     r"(?:^|[:/_-])(?:re-?)?review(?=$|[:/_-]|r?\d)",
+    re.IGNORECASE,
+)
+NON_BUILDER_SLUG_RE = re.compile(
+    r"(?:^|[:/_-])(?:(?:re-?)?review(?:er)?|research|explore|audit|council|adversar\w*)(?=$|[:/_-]|r?\d)",
+    re.IGNORECASE,
+)
+NON_BUILDER_TITLE_RE = re.compile(
+    r"(?:^\s*(?:(?:re-?)?review(?:er)?\b|(?:code|pr)\s+review(?:er)?\b|independent\s+(?:delta\s+)?review\b|"
+    r"adversar\w*\b|audit\b|council\b|research\b|explore\b)|"
+    r"\b(?:re-?)?review(?:er)?\s*$)",
     re.IGNORECASE,
 )
 REVIEW_SEND_MSG_RE = re.compile(
@@ -616,6 +628,10 @@ def _is_claude_target(providers: tuple[str, ...], model: str, *, default_claude:
     return default_claude
 
 
+def _sqlite_ro_uri(db_path: Path) -> str:
+    return f"{db_path.resolve().as_uri()}?mode=ro"
+
+
 def _statev2_thread_info(thread_id: str, home: Path) -> tuple[str | None, bool, tuple[str, ...], str]:
     """Return `(title, is_delegated_child, providers, model)` from T3's read-only statev2 projection."""
     is_child = thread_id.startswith("thread:delegated-task:")
@@ -623,7 +639,7 @@ def _statev2_thread_info(thread_id: str, home: Path) -> tuple[str | None, bool, 
     if not db_path.is_file():
         return None, is_child, (), ""
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(_sqlite_ro_uri(db_path), uri=True, timeout=0.5)
         try:
             row = conn.execute(
                 "SELECT title, "
@@ -853,34 +869,75 @@ def _host_resources(target_paths: tuple[str, ...] = ()) -> dict[str, float | Non
     }
 
 
-def _active_builder_count(home: Path) -> int:
+def _parse_iso_ts(value: object) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _active_builder_count(home: Path, now_ts: float | None = None) -> int:
     """Count currently running/queued delegated builder threads in T3's statev2 projection."""
     db_path = home / ".t3/userdata/statev2.sqlite"
     if not db_path.is_file():
         return 0
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(_sqlite_ro_uri(db_path), uri=True, timeout=0.5)
         try:
             rows = conn.execute(
-                "SELECT DISTINCT t.thread_id, t.title, json_extract(t.payload_json, '$.worktreePath') "
+                "SELECT t.thread_id, t.title, json_extract(t.payload_json, '$.worktreePath'), "
+                "t.updated_at, r.requested_at "
                 "FROM orchestration_v2_projection_runs r "
                 "JOIN orchestration_v2_projection_threads t ON t.thread_id = r.thread_id "
                 "WHERE r.status IN ('running', 'starting', 'preparing', 'queued') "
+                "AND r.completed_at IS NULL "
+                "AND t.archived_at IS NULL AND t.deleted_at IS NULL "
+                "AND NOT EXISTS ("
+                "    SELECT 1 FROM orchestration_v2_projection_runs r2 "
+                "    WHERE r2.thread_id = r.thread_id AND r2.ordinal > r.ordinal "
+                "    AND (r2.completed_at IS NOT NULL "
+                "         OR r2.status NOT IN ('running', 'starting', 'preparing', 'queued'))"
+                ") "
                 "AND (t.thread_id LIKE 'thread:delegated-task:%' "
-                "     OR json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent')"
+                "     OR json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent') "
+                "ORDER BY r.ordinal DESC, r.run_id DESC"
             ).fetchall()
         finally:
             conn.close()
     except sqlite3.Error:
         return 0
+    now = datetime.now(timezone.utc).timestamp() if now_ts is None else now_ts
+    by_thread: dict[str, tuple[str, str | None, float | None]] = {}
+    for tid, title, wt, updated_at, requested_at in rows:
+        tid_s = tid if isinstance(tid, str) else ""
+        if not tid_s:
+            continue
+        ts_vals = [ts for ts in (_parse_iso_ts(updated_at), _parse_iso_ts(requested_at)) if ts is not None]
+        latest_ts = max(ts_vals) if ts_vals else None
+        prev = by_thread.get(tid_s)
+        if prev is not None:
+            prev_title, prev_wt, prev_ts = prev
+            merged_ts = latest_ts if (latest_ts is not None and (prev_ts is None or latest_ts > prev_ts)) else prev_ts
+            by_thread[tid_s] = (prev_title, prev_wt, merged_ts)
+        else:
+            wt_s = wt.strip() if isinstance(wt, str) and wt.strip() else None
+            by_thread[tid_s] = (title if isinstance(title, str) else "", wt_s, latest_ts)
     count = 0
-    for tid, title, wt in rows:
-        if isinstance(wt, str) and wt.strip():
+    for tid_s, (title_s, wt_s, latest_ts) in by_thread.items():
+        if latest_ts is not None and (now - latest_ts) > ACTIVE_RUN_MAX_IDLE_SECONDS:
+            continue
+        if wt_s is not None:
             count += 1
             continue
-        title_s = title if isinstance(title, str) else ""
-        tid_s = tid if isinstance(tid, str) else ""
-        if REVIEW_SLUG_RE.search(tid_s) or REVIEW_TITLE_RE.search(title_s):
+        if NON_BUILDER_SLUG_RE.search(tid_s) or NON_BUILDER_TITLE_RE.search(title_s):
             continue
         count += 1
     return count

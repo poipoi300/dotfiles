@@ -63,36 +63,44 @@ class ModelGuardTests(unittest.TestCase):
              patch.object(model_guard, "_host_resources", return_value=healthy):
             return native.dispatch("claude", payload).get("hookSpecificOutput", {})
 
-    def _seed_statev2(self, threads: list[tuple]) -> None:
-        """Create a minimal T3 statev2.sqlite projection with `(thread_id, title, worktree, rel, run_status[, provider, model])`."""
+    def _seed_statev2(self, threads: list[tuple], *, extra_runs: list[tuple] = ()) -> None:
+        """Create a T3 statev2.sqlite projection matching live thread/run columns."""
         db = self.home / ".t3/userdata/statev2.sqlite"
         db.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(db)
         try:
             conn.execute(
                 "CREATE TABLE orchestration_v2_projection_threads "
-                "(thread_id TEXT PRIMARY KEY, title TEXT, payload_json TEXT)"
+                "(thread_id TEXT PRIMARY KEY, title TEXT, updated_at TEXT, archived_at TEXT, deleted_at TEXT, payload_json TEXT)"
             )
             conn.execute(
                 "CREATE TABLE orchestration_v2_projection_runs "
-                "(run_id TEXT PRIMARY KEY, thread_id TEXT, status TEXT)"
+                "(run_id TEXT PRIMARY KEY, thread_id TEXT, ordinal INTEGER, status TEXT, requested_at TEXT, completed_at TEXT)"
             )
             for idx, row in enumerate(threads):
                 tid, title, wt, rel, status = row[:5]
                 provider = row[5] if len(row) > 5 else None
                 model = row[6] if len(row) > 6 else None
+                updated_at = row[7] if len(row) > 7 else None
+                archived_at = row[8] if len(row) > 8 else None
                 payload = {"worktreePath": wt, "lineage": {"relationshipToParent": rel}}
                 if provider:
                     payload["providerInstanceId"] = provider
                 if model or provider:
                     payload["modelSelection"] = {"provider": provider, "model": model}
                 conn.execute(
-                    "INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?)",
-                    (tid, title, json.dumps(payload)),
+                    "INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?, ?, ?, ?)",
+                    (tid, title, updated_at, archived_at, None, json.dumps(payload)),
                 )
+                completed_at = "2026-11-26T00:00:00Z" if status not in ("running", "starting", "preparing", "queued") else None
                 conn.execute(
-                    "INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?)",
-                    (f"run:{idx}", tid, status),
+                    "INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?, ?)",
+                    (f"run:{idx}", tid, 1, status, updated_at, completed_at),
+                )
+            for ridx, (tid, ordinal, status, req_at, comp_at) in enumerate(extra_runs):
+                conn.execute(
+                    "INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?, ?, ?, ?)",
+                    (f"extra:{ridx}", tid, ordinal, status, req_at, comp_at),
                 )
             conn.commit()
         finally:
@@ -154,9 +162,11 @@ class ModelGuardTests(unittest.TestCase):
 
     def test_mid_session_budget_refreshes_on_stale_delegation_only(self):
         startup = unittest.mock.Mock(return_value="[Budget fresh]")
+        healthy = {"mem_avail_gib": 32.0, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 24.0, "shm_total_gib": 46.0}
         with patch.object(native, "ROOT", self.home), \
              patch.object(Path, "home", return_value=self.home), \
              patch.object(model_guard, "routing", None), \
+             patch.object(model_guard, "_host_resources", return_value=healthy), \
              patch.object(behavior, "design_hook", return_value={}), \
              usage(startup=startup):
             # SessionStart records the fresh marker.
@@ -431,15 +441,28 @@ class ModelGuardTests(unittest.TestCase):
         plain_dir.mkdir()
 
         # 4 active delegated builders (including "preview" slug without worktree, R4) + 2 active read-only reviews.
-        self._seed_statev2([
-            ("thread:delegated-task:w1", "Implement #1", "/tmp/w1", "subagent", "running"),
-            ("thread:delegated-task:w2", "Implement #2", "/tmp/w2", "subagent", "running"),
-            ("thread:delegated-task:w3", "Implement #3", "/tmp/w3", "subagent", "starting"),
-            ("thread:delegated-task:fix-preview", "Implement #4 preview", None, "subagent", "queued"),
-            ("thread:delegated-task:review-1-r1", "Review #1 R1", None, "subagent", "running"),
-            ("thread:delegated-task:r2", "Review #2 R1", None, "subagent", "running"),
-            ("thread:delegated-task:done", "Implement #0", "/tmp/w0", "subagent", "completed"),
-        ])
+        # Superseded queued runs, archived threads, and >12h-stale zombie runs must NOT steal builder slots.
+        self._seed_statev2(
+            [
+                ("thread:delegated-task:w1", "Implement #1", "/tmp/w1", "subagent", "running"),
+                ("thread:delegated-task:w2", "Implement #2", "/tmp/w2", "subagent", "running"),
+                ("thread:delegated-task:w3", "Implement #3", "/tmp/w3", "subagent", "starting"),
+                ("thread:delegated-task:fix-preview", "Implement #4 preview", None, "subagent", "queued"),
+                ("thread:delegated-task:review-1-r1", "Review #1 R1", None, "subagent", "running"),
+                ("thread:delegated-task:r2", "Review #2 R1", None, "subagent", "running"),
+                ("thread:delegated-task:research-1", "Research crate options", None, "subagent", "running"),
+                ("thread:delegated-task:r-end", "PR #99 review", None, "subagent", "running"),
+                ("thread:delegated-task:done", "Implement #0", "/tmp/w0", "subagent", "completed"),
+                ("thread:delegated-task:superseded", "Old superseded", "/tmp/old", "subagent", "queued"),
+                ("thread:delegated-task:archived", "Archived run", "/tmp/arch", "subagent", "running", None, None, None, "2026-11-26T00:00:00Z"),
+                ("thread:delegated-task:zombie", "Stale zombie", "/tmp/zmb", "subagent", "running", None, None, "2020-01-01T00:00:00Z"),
+            ],
+            extra_runs=[
+                ("thread:delegated-task:superseded", 2, "failed", "2026-11-21T19:25:00Z", "2026-11-21T19:25:11Z"),
+                ("thread:delegated-task:w1", 2, "queued", None, None),
+            ],
+        )
+        self.assertEqual(model_guard._active_builder_count(self.home), 4)
 
         # 5th builder in a Cargo workspace (including via target cwd when caller cwd is plain_dir, R7) -> denied (cap 4).
         out_cap = self.decide("mcp__t3-code__delegate_task", {
