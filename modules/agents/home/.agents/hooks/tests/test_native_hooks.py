@@ -6,6 +6,7 @@ import concurrent.futures
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -56,8 +57,46 @@ class ModelGuardTests(unittest.TestCase):
 
     def decide(self, tool, tool_input, **extra):
         payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tool_input, **extra}
-        with patch.object(Path, "home", return_value=self.home), patch.object(model_guard, "routing", None):
+        healthy = {"mem_avail_gib": 32.0, "root_free_gib": 50.0, "shm_free_gib": 24.0, "shm_total_gib": 46.0}
+        with patch.object(Path, "home", return_value=self.home), \
+             patch.object(model_guard, "routing", None), \
+             patch.object(model_guard, "_host_resources", return_value=healthy):
             return native.dispatch("claude", payload).get("hookSpecificOutput", {})
+
+    def _seed_statev2(self, threads: list[tuple]) -> None:
+        """Create a minimal T3 statev2.sqlite projection with `(thread_id, title, worktree, rel, run_status[, provider, model])`."""
+        db = self.home / ".t3/userdata/statev2.sqlite"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db)
+        try:
+            conn.execute(
+                "CREATE TABLE orchestration_v2_projection_threads "
+                "(thread_id TEXT PRIMARY KEY, title TEXT, payload_json TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE orchestration_v2_projection_runs "
+                "(run_id TEXT PRIMARY KEY, thread_id TEXT, status TEXT)"
+            )
+            for idx, row in enumerate(threads):
+                tid, title, wt, rel, status = row[:5]
+                provider = row[5] if len(row) > 5 else None
+                model = row[6] if len(row) > 6 else None
+                payload = {"worktreePath": wt, "lineage": {"relationshipToParent": rel}}
+                if provider:
+                    payload["providerInstanceId"] = provider
+                if model or provider:
+                    payload["modelSelection"] = {"provider": provider, "model": model}
+                conn.execute(
+                    "INSERT INTO orchestration_v2_projection_threads VALUES (?, ?, ?)",
+                    (tid, title, json.dumps(payload)),
+                )
+                conn.execute(
+                    "INSERT INTO orchestration_v2_projection_runs VALUES (?, ?, ?)",
+                    (f"run:{idx}", tid, status),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_ultra_tier_delegates_and_launches_require_opt_in_without_blanket_ban(self):
         for tool, tool_input in (
@@ -231,6 +270,228 @@ class ModelGuardTests(unittest.TestCase):
         }) + "\n", encoding="utf-8")
         out_sub = self.decide("Agent", {"prompt": "nested", "subagent_type": "Explore"}, transcript_path=str(sub_tr))
         self.assertEqual(out_sub["permissionDecision"], "deny")
+
+        # Ordinary delegated implementation worker with no delegation wording -> default-DENIED.
+        worker_tr = self.home / "worker-child.jsonl"
+        worker_tr.write_text(json.dumps({
+            "type": "user",
+            "message": {"content": (
+                '[T3 Code: the agent in T3 thread "coord-1" sent this message, not the user.]\n\n'
+                "Implement GitHub issue #163 animated stills in this worktree and commit locally."
+            )},
+        }) + "\n", encoding="utf-8")
+        for tool, inp in (
+            ("Agent", {"prompt": "review my diff", "subagent_type": "reviewer"}),
+            ("mcp__t3-code__delegate_task", {"task": "review #163", "target": {"model": "gemini-4-neon"}}),
+        ):
+            out_w = self.decide(tool, inp, transcript_path=str(worker_tr))
+            self.assertEqual(out_w.get("permissionDecision"), "deny", tool)
+            self.assertIn("must not spawn subagents", out_w.get("permissionDecisionReason", ""))
+
+    def test_claude_max_and_ultrathink_effort_are_blocked_while_xhigh_and_non_claude_pass(self):
+        self._seed_statev2([
+            ("claude-top-1", "Main Claude Thread", None, None, "idle", "claudeAgent", "claude-opus-5-5"),
+        ])
+        for tool, inp in (
+            ("mcp__t3-code__delegate_task", {
+                "task": "implement #163",
+                "target": {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5", "options": {"effort": "max"}},
+            }),
+            ("mcp__t3-code__delegate_task", {
+                "task": "implement #163",
+                "target": {"providerInstanceId": "claudeAgent", "model": "claude-sonnet-5-5",
+                           "options": [{"id": "effort", "value": "ultrathink"}]},
+            }),
+            # Opaque providerInstanceId with driverKind=claudeAgent (R3a).
+            ("mcp__t3-code__delegate_task", {
+                "task": "implement #163",
+                "target": {"providerInstanceId": "default", "driverKind": "claude-code", "options": {"effort": "max"}},
+            }),
+            # Outer modelSelection paired with sibling options (R2).
+            ("mcp__t3-code__t3_thread_launch", {
+                "title": "Build feature", "message": "go",
+                "modelSelection": {"provider": "claude", "model": "claude-opus-5-5"},
+                "options": {"effort": "max"},
+            }),
+            # Thread-configure updating only options on an existing Claude thread in statev2 (R2).
+            ("mcp__t3-code__t3_thread_configure", {
+                "threadId": "claude-top-1",
+                "modelSelection": {"options": {"effort": "max"}},
+            }),
+            # Batch create_threads: opt-in in item 0 must NOT authorize item 1 (R3c).
+            ("mcp__t3-code__create_threads", {
+                "threads": [
+                    {"prompt": "[max-effort: explicit] a", "target": {"model": "claude-opus-5-5", "options": {"effort": "max"}}},
+                    {"prompt": "b", "target": {"model": "claude-opus-5-5", "options": {"effort": "max"}}},
+                ],
+            }),
+            # Agent with omitted model inherits Claude (R3b).
+            ("Agent", {"prompt": "go", "subagent_type": "general-purpose", "options": {"effort": "max"}}),
+            ("Agent", {"prompt": "go", "subagent_type": "general-purpose", "model": "claude-opus-5-5-max"}),
+        ):
+            out = self.decide(tool, inp)
+            self.assertEqual(out.get("permissionDecision"), "deny", (tool, inp))
+            self.assertIn("xhigh", out.get("permissionDecisionReason", ""))
+
+        # xhigh/high on Claude, non-Claude max, and explicit [max-effort: ...] opt-in pass.
+        for tool, inp in (
+            ("mcp__t3-code__delegate_task", {
+                "task": "implement #163",
+                "target": {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5", "options": {"effort": "xhigh"}},
+            }),
+            ("mcp__t3-code__delegate_task", {
+                "task": "implement #163",
+                "target": {"providerInstanceId": "codex", "model": "gpt-6.2-sol", "options": {"reasoningEffort": "max"}},
+            }),
+            ("mcp__t3-code__delegate_task", {
+                "task": "[max-effort: user explicitly requested] implement #163",
+                "target": {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5", "options": {"effort": "max"}},
+            }),
+            ("mcp__t3-code__t3_thread_configure", {
+                "modelSelection": {"model": "claude-opus-5-5", "options": {"effort": "xhigh"}},
+            }),
+            ("mcp__t3-code__create_threads", {
+                "target": {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5"},
+                "threads": [{"prompt": "go", "target": {"providerInstanceId": "codex", "options": {"effort": "max"}}}],
+            }),
+        ):
+            self.assertNotIn("permissionDecision", self.decide(tool, inp), (tool, inp))
+
+    def test_thread_send_blocks_reviews_and_recycled_workers_but_allows_same_issue_followups(self):
+        self._seed_statev2([
+            ("thread:delegated-task:review-149-r1", "Review #170 R1: Theme system", None, "subagent", "completed"),
+            ("thread:delegated-task:worker-148-v1", "Implement #148: Canvas shade dropdowns", "/tmp/wt-148", "subagent", "completed"),
+            ("thread:delegated-task:fix-page-preview", "Implement #102: Remote ZIP first preview", "/tmp/wt-102", "subagent", "completed"),
+            ("top-level-thread-1", "Main Feature Thread", None, None, "idle"),
+            ("top-level-review-1", "Review PR #42 architecture", None, None, "idle"),
+        ])
+        # Sending a re-review or new review to a reviewer thread -> denied.
+        out_rev = self.decide("mcp__t3-code__t3_thread_send", {
+            "threadId": "thread:delegated-task:review-149-r1",
+            "message": "Round 2 review of #170: verify R1-R8.",
+        })
+        self.assertEqual(out_rev.get("permissionDecision"), "deny")
+        self.assertIn("fresh delegate_task", out_rev.get("permissionDecisionReason", ""))
+
+        # Sending explicit review prompts to a delegated worker thread -> denied (R6).
+        for rev_msg in (
+            "Review only. Do not edit, commit, or push. Audit commit abc123.",
+            "Please re-review this branch after the fix.",
+            "Review PR #148 and report blockers.",
+        ):
+            out_rev_msg = self.decide("mcp__t3-code__t3_thread_send", {
+                "threadId": "thread:delegated-task:worker-148-v1",
+                "message": rev_msg,
+            })
+            self.assertEqual(out_rev_msg.get("permissionDecision"), "deny", rev_msg)
+
+        # Recycling a delegated worker with freshContext=true -> denied.
+        out_fresh = self.decide("mcp__t3-code__t3_thread_send", {
+            "threadId": "thread:delegated-task:worker-148-v1",
+            "freshContext": True,
+            "message": "Now build #176 plugin manager.",
+        })
+        self.assertEqual(out_fresh.get("permissionDecision"), "deny")
+        self.assertIn("freshContext=true", out_fresh.get("permissionDecisionReason", ""))
+
+        # Repurposing a delegated worker onto a different issue (even with preamble or referencing old issue, R5) -> denied.
+        for repurpose_msg in (
+            "Implement #176: Plugin manager, trust levels, and SDK.",
+            "Please now fix #176 since #148 is done.",
+        ):
+            out_repurpose = self.decide("mcp__t3-code__t3_thread_send", {
+                "threadId": "thread:delegated-task:worker-148-v1",
+                "message": repurpose_msg,
+            })
+            self.assertEqual(out_repurpose.get("permissionDecision"), "deny", repurpose_msg)
+            self.assertIn("#176", out_repurpose.get("permissionDecisionReason", ""))
+
+        # Same-issue fix follow-ups (including summary lead-ins & "preview" slug, R4/R6) -> ALLOWED.
+        for ok_tid, ok_msg in (
+            ("thread:delegated-task:worker-148-v1", "Fix R1-R5 findings from round 1 review on #148 and commit locally."),
+            ("thread:delegated-task:worker-148-v1", "Round 1 review found 2 issues — fix both and re-run tests."),
+            ("thread:delegated-task:worker-148-v1", "Review the failing test output below and fix it."),
+            ("thread:delegated-task:fix-page-preview", "Fix the seek budget test failure on #102."),
+        ):
+            self.assertEqual(self.decide("mcp__t3-code__t3_thread_send", {
+                "threadId": ok_tid, "message": ok_msg,
+            }), {}, (ok_tid, ok_msg))
+
+        # Top-level user threads (even with a "Review ..." title, R1) -> ALLOWED.
+        for top_tid in ("top-level-thread-1", "top-level-review-1"):
+            self.assertEqual(self.decide("mcp__t3-code__t3_thread_send", {
+                "threadId": top_tid, "message": "Please merge the approved PRs.",
+            }), {}, top_tid)
+
+    def test_builder_concurrency_cap_and_resource_headroom_guards(self):
+        cargo_dir = self.home / "rust-repo"
+        cargo_dir.mkdir()
+        (cargo_dir / "Cargo.toml").write_text("[workspace]\n", encoding="utf-8")
+        plain_dir = self.home / "docs-repo"
+        plain_dir.mkdir()
+
+        # 4 active delegated builders (including "preview" slug without worktree, R4) + 2 active read-only reviews.
+        self._seed_statev2([
+            ("thread:delegated-task:w1", "Implement #1", "/tmp/w1", "subagent", "running"),
+            ("thread:delegated-task:w2", "Implement #2", "/tmp/w2", "subagent", "running"),
+            ("thread:delegated-task:w3", "Implement #3", "/tmp/w3", "subagent", "starting"),
+            ("thread:delegated-task:fix-preview", "Implement #4 preview", None, "subagent", "queued"),
+            ("thread:delegated-task:review-1-r1", "Review #1 R1", None, "subagent", "running"),
+            ("thread:delegated-task:r2", "Review #2 R1", None, "subagent", "running"),
+            ("thread:delegated-task:done", "Implement #0", "/tmp/w0", "subagent", "completed"),
+        ])
+
+        # 5th builder in a Cargo workspace (including via target cwd when caller cwd is plain_dir, R7) -> denied (cap 4).
+        out_cap = self.decide("mcp__t3-code__delegate_task", {
+            "task": "Implement #5", "isolation": "worktree", "role": "implementation",
+            "cwd": str(cargo_dir), "target": {"model": "claude-sonnet-5-5"},
+        }, cwd=str(plain_dir))
+        self.assertEqual(out_cap.get("permissionDecision"), "deny")
+        self.assertIn("cap 4", out_cap.get("permissionDecisionReason", ""))
+
+        # Read-only reviewers (delegate_task, t3_thread_launch, create_threads, R8) -> ALLOWED even at cap 4.
+        for tool, inp in (
+            ("mcp__t3-code__delegate_task", {"task": "Review only. Audit #1.", "role": "review", "target": {"model": "gemini-4-neon"}}),
+            ("mcp__t3-code__t3_thread_launch", {"title": "Audit #1", "message": "Independent review of #1."}),
+            ("mcp__t3-code__create_threads", {"threads": [{"title": "Review #1", "prompt": "Independent review", "role": "review"}]}),
+            ("mcp__t3-code__create_threads", {"threads": [{"message": "Independent review of #1."}]}),
+        ):
+            self.assertEqual(self.decide(tool, inp, cwd=str(cargo_dir)), {}, tool)
+
+        # Non-compiled workspace has cap 6 -> 5th builder allowed, batch of 3 denied (4 + 3 > 6).
+        self.assertEqual(self.decide("mcp__t3-code__delegate_task", {
+            "task": "Edit docs #5", "isolation": "worktree", "target": {"model": "claude-sonnet-5-5"},
+        }, cwd=str(plain_dir)), {})
+        out_batch = self.decide("mcp__t3-code__create_threads", {
+            "threads": [{"prompt": "a"}, {"prompt": "b"}, {"prompt": "c"}],
+        }, cwd=str(plain_dir))
+        self.assertEqual(out_batch.get("permissionDecision"), "deny")
+        self.assertIn("cap 6", out_batch.get("permissionDecisionReason", ""))
+
+        # Low host RAM / disk / workspace mount / /dev/shm blocks builders & native worktree Agent (R9); critical RAM blocks reviews.
+        for tool, bad_res, snippet, is_review, is_worktree in (
+            ("mcp__t3-code__delegate_task", {"mem_avail_gib": 5.2, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 20.0, "shm_total_gib": 46.0}, "Low host RAM", False, False),
+            ("mcp__t3-code__delegate_task", {"mem_avail_gib": 30.0, "root_free_gib": 3.1, "target_free_gib": 50.0, "shm_free_gib": 20.0, "shm_total_gib": 46.0}, "Low root disk", False, False),
+            ("mcp__t3-code__delegate_task", {"mem_avail_gib": 30.0, "root_free_gib": 50.0, "target_free_gib": 2.5, "shm_free_gib": 20.0, "shm_total_gib": 46.0}, "Low workspace disk", False, False),
+            ("mcp__t3-code__delegate_task", {"mem_avail_gib": 30.0, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 1.8, "shm_total_gib": 46.0}, "Low /dev/shm", False, False),
+            ("mcp__t3-code__delegate_task", {"mem_avail_gib": 1.9, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 20.0, "shm_total_gib": 46.0}, "Critically low host RAM", True, False),
+            ("Agent", {"mem_avail_gib": 5.0, "root_free_gib": 50.0, "target_free_gib": 50.0, "shm_free_gib": 20.0, "shm_total_gib": 46.0}, "Low host RAM", False, True),
+        ):
+            inp = (
+                {"prompt": "build in wt", "subagent_type": "general-purpose", "isolation": "worktree"}
+                if tool == "Agent"
+                else {"task": "Review only." if is_review else "Build #9",
+                      "role": "review" if is_review else "implementation",
+                      "target": {"model": "gemini-4-neon"}}
+            )
+            payload = {"hook_event_name": "PreToolUse", "cwd": str(plain_dir), "tool_name": tool, "tool_input": inp}
+            with patch.object(Path, "home", return_value=self.home), \
+                 patch.object(model_guard, "routing", None), \
+                 patch.object(model_guard, "_active_builder_count", return_value=0), \
+                 patch.object(model_guard, "_host_resources", return_value=bad_res):
+                out = native.dispatch("claude", payload).get("hookSpecificOutput", {})
+            self.assertEqual(out.get("permissionDecision"), "deny", (tool, snippet))
+            self.assertIn(snippet, out.get("permissionDecisionReason", ""))
 
 
 class NativeHookTests(unittest.TestCase):

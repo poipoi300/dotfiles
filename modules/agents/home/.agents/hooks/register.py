@@ -82,7 +82,9 @@ def handlers(home: Path, provider: str) -> dict:
                                for tool in ("run_command", "invoke_subagent",
                                             "mcp_t3-code_delegate_task",
                                             "mcp_t3-code_t3_thread_launch",
-                                            "mcp_t3-code_create_threads")],
+                                            "mcp_t3-code_create_threads",
+                                            "mcp_t3-code_t3_thread_send",
+                                            "mcp_t3-code_t3_thread_configure")],
                 "SessionStart": [{**handler, "timeout": 20}],
                 "PreInvocation": [{**handler, "timeout": 20}]}
     result = {}

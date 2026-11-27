@@ -206,12 +206,17 @@ user's own repository, an upstream pull request, that pull request plus a carry 
 default branch, or a branch and pull request on someone else's repository (`bin/fix-route`
 prints it, for debugging). The user's own repository can opt into pull requests with
 `git config agents.route pr`; only that repository's own config selects `pr`, never the global
-config. `hooks/model_guard.py` guards subagent, delegate, and thread launches (`Agent`, `Task`,
-`spawn_agent`, `invoke_subagent`, `delegate_task`, `t3_thread_launch`, `create_threads`): it
+config. `hooks/model_guard.py` guards subagent, delegate, and thread calls (`Agent`, `Task`,
+`spawn_agent`, `invoke_subagent`, `delegate_task`, `t3_thread_launch`, `create_threads`,
+`t3_thread_send`, `t3_thread_configure`): it default-denies delegated/subagent children from
+spawning nested subagents unless explicitly authorized, denies `t3_thread_send` for reviews,
+re-reviews, or recycling delegated threads onto new tasks, blocks Claude `effort="max"` /
+`"ultrathink"` without `[max-effort: <reason>]`, enforces active builder concurrency caps (4 for
+compiled workspaces, 6 otherwise) and host RAM/disk/`/dev/shm` headroom before launching builders,
 denies Claude parent-transcript forks (`Agent`/`Task` with omitted or `"fork"` `subagent_type`)
-above 150k tokens, Antigravity `invoke_subagent` calls inheriting a non-Gemini `3p` model, and
-rate-derived ultra-tier models (`>= 3x` provider standard rate) unless the prompt or task includes
-`[ultra: <short reason>]`. Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
+above 150k tokens, denies Antigravity `invoke_subagent` calls inheriting a non-Gemini `3p` model,
+and requires `[ultra: <short reason>]` for rate-derived ultra-tier models (`>= 3x` provider
+standard rate). Agents aren't told about routes: `hooks/vcs_guard.py` denies a commit on the default
 branch of a fork, someone else's repository, or a `pr` repository, and a push or pull request that
 misses the route. In a `pr` repository it also denies a merge, cherry-pick, rebase, `am`, revert
 or pull on the default branch (mid-operation too) unless it only fast-forwards from origin's

@@ -104,6 +104,16 @@ class GrokTests(unittest.TestCase):
                 allowed = {**nested, "tool_input": {"task": "x", "target": {"model": "claude-haiku-5-5"}}}
                 output = native.dispatch("grok", grok("t3-code__delegate_task", allowed))
                 self.assertNotIn("permissionDecision", output.get("hookSpecificOutput", {}))
+                send_nested = {"tool_name": "t3-code__t3_thread_send",
+                               "tool_input": {"threadId": "thread:delegated-task:review-9-r1", "message": "Round 2 review"}}
+                output = native.dispatch("grok", grok("t3-code__t3_thread_send", send_nested))
+                self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertIn("fresh delegate_task", output["hookSpecificOutput"]["permissionDecisionReason"])
+                cfg_nested = {"tool_name": "t3-code__t3_thread_configure",
+                              "tool_input": {"modelSelection": {"model": "claude-opus-5-5", "options": {"effort": "max"}}}}
+                output = native.dispatch("grok", grok("t3-code__t3_thread_configure", cfg_nested))
+                self.assertEqual(output["hookSpecificOutput"]["permissionDecision"], "deny")
+                self.assertIn("xhigh", output["hookSpecificOutput"]["permissionDecisionReason"])
 
     @needs_rtk
     def test_rtk_rewrite_keeps_grok_arguments(self):
@@ -292,6 +302,23 @@ class AntigravityTests(unittest.TestCase):
         parent_call = {**antigravity("invoke_subagent", {"Model": "flash", "Prompt": "check db"}), "lastUserInput": parent_input}
         self.assertEqual(native.dispatch("antigravity", parent_call), {})
 
+        # Antigravity delegate_task with Claude effort=max and t3_thread_send to a review thread are both denied.
+        max_call = antigravity("mcp_t3-code_delegate_task", {
+            "task": "build feature", "toolSummary": "Build feature",
+            "target": {"providerInstanceId": "claudeAgent", "model": "claude-opus-5-5", "options": {"effort": "max"}},
+        })
+        denied_max = native.dispatch("antigravity", max_call)
+        self.assertEqual(denied_max["decision"], "deny")
+        self.assertIn("xhigh", denied_max["reason"])
+
+        send_rev = antigravity("mcp_t3-code_t3_thread_send", {
+            "threadId": "thread:delegated-task:review-105-r1",
+            "message": "Round 2 review of #171", "toolSummary": "Send re-review",
+        })
+        denied_send = native.dispatch("antigravity", send_rev)
+        self.assertEqual(denied_send["decision"], "deny")
+        self.assertIn("fresh delegate_task", denied_send["reason"])
+
 
 class RegistrationTests(unittest.TestCase):
     def setUp(self):
@@ -452,6 +479,7 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual([group["matcher"] for group in entry["PreToolUse"]], [
             "run_command", "invoke_subagent", "mcp_t3-code_delegate_task",
             "mcp_t3-code_t3_thread_launch", "mcp_t3-code_create_threads",
+            "mcp_t3-code_t3_thread_send", "mcp_t3-code_t3_thread_configure",
         ])
         self.assertTrue(entry["SessionStart"][0]["command"].endswith(" antigravity || true"))
         self.assertTrue(entry["PreInvocation"][0]["command"].endswith(" antigravity || true"))

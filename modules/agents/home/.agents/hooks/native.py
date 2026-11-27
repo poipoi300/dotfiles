@@ -41,6 +41,8 @@ GROK_TOOLS = {
     "t3-code__delegate_task": "mcp__t3-code__delegate_task",
     "t3-code__t3_thread_launch": "mcp__t3-code__t3_thread_launch",
     "t3-code__create_threads": "mcp__t3-code__create_threads",
+    "t3-code__t3_thread_send": "mcp__t3-code__t3_thread_send",
+    "t3-code__t3_thread_configure": "mcp__t3-code__t3_thread_configure",
 }
 ANTIGRAVITY_TOOLS = {
     "run_command": "Bash",
@@ -48,6 +50,8 @@ ANTIGRAVITY_TOOLS = {
     "mcp_t3-code_delegate_task": "mcp__t3-code__delegate_task",
     "mcp_t3-code_t3_thread_launch": "mcp__t3-code__t3_thread_launch",
     "mcp_t3-code_create_threads": "mcp__t3-code__create_threads",
+    "mcp_t3-code_t3_thread_send": "mcp__t3-code__t3_thread_send",
+    "mcp_t3-code_t3_thread_configure": "mcp__t3-code__t3_thread_configure",
 }
 GROK_TRUNCATED = ("This shell command is too large for the hook to read whole, so it was not run. "
                   "Write long content to a file with the edit tools first, then run a shorter command.")
