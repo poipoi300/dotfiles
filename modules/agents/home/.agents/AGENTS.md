@@ -103,10 +103,10 @@ Avoid avoidable context and turn waste:
   compound command that exits with the failure tail). Never busy-poll a running
   shell or PTY with repeated empty `write_stdin`, `wait`, or `sleep` calls
   shorter than 30 seconds.
-- In orchestrator worker briefs, point to `sol-loop` and `agent-roles` (one
-  review cycle per PR within the round budget, not per intermediate commit)
-  rather than writing custom "recheck until APPROVE" clauses or hardcoding
-  ultra-tier models.
+- For multi-issue or parallel-PR batches, load the `orchestration` skill: keep
+  builders single-level (no nested subagents) and run one coordinator-owned
+  cross-family review loop per PR via `sol-loop` and `agent-roles`, rather than
+  custom "recheck until APPROVE" clauses or hardcoding ultra-tier models.
 
 ## Preferred stack
 

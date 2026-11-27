@@ -165,6 +165,7 @@ per provider from the shared sources above.
 python3 -I -B -m unittest discover -s ~/.agents/tests
 python3 -I -B -m unittest discover -s ~/.agents/hooks/tests
 python3 -I -B -m unittest discover -s ~/.agents/usage/tests   # private module only
+python3 -I -B -m unittest discover -s ~/.agents/skills/orchestration/tests
 python3 ~/.agents/skills/humanizer/tests/test_checker.py
 uv run ~/.agents/skills/council/tests/test_garble.py
 python3 -I -B ~/.agents/skills/council/tests/test_witness.py
