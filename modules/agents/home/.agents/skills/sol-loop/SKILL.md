@@ -18,8 +18,7 @@ Severities and the reply format are in `~/.agents/roles/reviewer.md`.
 
 Be careful of scope creep and don't be scared to push back. One general
 reviewer only. full-send may add `ml-reviewer` alongside. Reviewers must
-not start subagents or reviewers. Record usage when the reviewer returns it;
-never guess it.
+not start subagents or reviewers.
 
 ## 1. Scope
 
@@ -98,5 +97,4 @@ Name the reviewer model you actually ran, Sol or the fallback:
 Add `on <effort>` only if verified.
 
 Report: rounds, model, what the reviewer changed, diff size before/after,
-fixed and declined findings with reasons, usage if exposed (else say not),
-pushed or not.
+fixed and declined findings with reasons, and whether it was pushed.

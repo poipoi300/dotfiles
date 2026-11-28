@@ -48,8 +48,6 @@ one appears.
 
 ## Steps
 
-0. **Check usage.** Follow the AGENTS.md usage rule before you start. Above
-   90%, ask (see "Asking the user") before work longer than about an hour.
 1. **Finish the change.** Complete the goal from the user's request with the
    smallest change that works. Fix the case that happened, not every case
    that could. If you are on the default branch, create a branch first.
@@ -151,7 +149,6 @@ Ask only when you cannot continue alone:
   changing things outside the repo, closing a PR, or force-pushing any other
   branch.
 - The goal is ambiguous in a way that changes the result.
-- Usage is above 90% and the work will take more than about an hour.
 - Another PR makes this one obsolete.
 
 Decide everything else yourself with sensible defaults, and list those decisions
