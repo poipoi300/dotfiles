@@ -271,6 +271,42 @@ class ModelGuardTests(unittest.TestCase):
             {},
         )
 
+        # A coordinator told to use delegate_task may delegate, even when the brief also limits
+        # its delegates ("no subagents" there is about the builders, not the coordinator).
+        for prompt_body in (
+            "You run in the repo, so use `delegate_task` with `isolation: \"worktree\"` for every builder "
+            "and reviewer. Next: one fix delegate (worktree; `git switch fork`; no subagents).",
+            "You may delegate builders and reviewers; builders must not spawn subagents.",
+        ):
+            grant_tr = self.home / "grant.jsonl"
+            grant_tr.write_text(json.dumps({
+                "type": "user",
+                "message": {"content": (
+                    '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n\n'
+                    + prompt_body
+                )},
+            }) + "\n", encoding="utf-8")
+            self.assertEqual(
+                self.decide("mcp__t3-code__delegate_task", {"task": "fix", "target": {"model": "gpt-6.2-sol"}},
+                            transcript_path=str(grant_tr)),
+                {},
+                prompt_body,
+            )
+
+        # Negated mentions of delegate_task are no grant.
+        for prompt_body in ("Do not use delegate_task; work directly.", "Never use `delegate_task` here."):
+            deny_tr = self.home / "deny.jsonl"
+            deny_tr.write_text(json.dumps({
+                "type": "user",
+                "message": {"content": (
+                    '[T3 Code: the agent in T3 thread "parent-1" sent this message, not the user.]\n\n'
+                    + prompt_body
+                )},
+            }) + "\n", encoding="utf-8")
+            out_neg = self.decide("mcp__t3-code__delegate_task", {"task": "fix", "target": {"model": "gpt-6.2-sol"}},
+                                  transcript_path=str(deny_tr))
+            self.assertEqual(out_neg.get("permissionDecision"), "deny", prompt_body)
+
         # Native Claude subagent under /subagents/ running as a reviewer -> denied.
         sub_tr = self.home / "sess/subagents/agent-1.jsonl"
         sub_tr.parent.mkdir(parents=True)

@@ -63,8 +63,10 @@ CHILD_EXPLICIT_NO_DELEGATE_RE = re.compile(
     re.IGNORECASE,
 )
 CHILD_ALLOW_DELEGATE_RE = re.compile(
-    r"(?<!not\s)(?<!never\s)\b(?:you\s+may|authorized\s+to|explicitly\s+allowed\s+to|permitted\s+to)\s+"
-    r"(?:delegate|spawn\s+subagents|start\s+subagents|launch\s+subagents)\b",
+    r"(?<!not\s)(?<!never\s)(?<!n't\s)\b(?:"
+    r"(?:you\s+may|authorized\s+to|explicitly\s+allowed\s+to|permitted\s+to)\s+"
+    r"(?:delegate|spawn\s+subagents|start\s+subagents|launch\s+subagents)\b|"
+    r"use\s+`?(?:mcp__t3-code__)?delegate_task\b)",
     re.IGNORECASE,
 )
 REVIEW_DELEGATION_RE = re.compile(
@@ -1062,14 +1064,15 @@ def _check_child_no_delegation(payload: dict, home: Path | None = None) -> dict 
     is_child, body = _child_task_body(payload, home=home)
     if not is_child:
         return None
-    # Explicit prohibition always wins, even if the prompt mentions "subagents" in a negative clause.
+    # An explicit grant wins: a coordinator's brief also states its own delegates' limits
+    # ("builders: no subagents"), which would otherwise read as a prohibition aimed at it.
+    if body and CHILD_ALLOW_DELEGATE_RE.search(body):
+        return None
     if body and CHILD_EXPLICIT_NO_DELEGATE_RE.search(body):
         return _deny(
             "This delegated child/council reviewer session must not spawn subagents or child tasks. "
             "Complete the work directly yourself."
         )
-    if body and CHILD_ALLOW_DELEGATE_RE.search(body):
-        return None
     return _deny(
         "Delegated child and subagent sessions must do the work themselves and must not spawn subagents "
         "unless the parent task explicitly authorizes delegation (e.g. 'you may delegate ...'). "
