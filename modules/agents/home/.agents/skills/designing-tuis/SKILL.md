@@ -53,6 +53,10 @@ Layout, columns, and actions come from these answers, not from a template. A col
 - Redraw on change or on the shared tick, never in an unconditional loop. Any growing list is virtualized or ring-buffered.
 - Tests run headless: unit tests for state transitions, a snapshot of the main screen at a fixed size with a frozen clock, and scripted key sequences.
 
+## Testing without taking over the screen
+
+Drive the app through the framework's headless test driver (Textual `run_test()` pilot, `ink-testing-library`, Ratatui `TestBackend`, Bubble Tea `teatest`; see [references/frameworks.md](references/frameworks.md)). When an end-to-end check needs a real terminal, run it under a PTY in the test process (a detached tmux session, Python `pty`, `node-pty`) and read the screen from it. Prefer the project's existing test driver; otherwise fetch ephemerally (`uvx`, `bunx`) without dirtying lockfiles. Don't open a new terminal window when a driver or PTY will do.
+
 ## Review before calling it done
 
 1. **Clutter audit.** Count border nesting depth, duplicate encodings of one state, markers present on every row, and cells spent on chrome versus data. Name each element to remove. For each decorative element ask: does deleting it lose information?

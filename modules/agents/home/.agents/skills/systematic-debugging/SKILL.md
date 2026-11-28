@@ -117,7 +117,11 @@ You MUST complete each phase before proceeding to the next.
    - Where does bad value originate?
    - What called this with bad value?
    - Keep tracing up until you find the source
+   - Confirm the defect's path is reachable from the reported entry point (check all call sites, not just the first match) before calling it the root cause
    - Fix at source, not at symptom
+
+6. **Check One Layer Down**
+   - When behavior seems to come from nowhere and your own source has no trace of it, check the defaults of the layer below (component library, ORM, HTTP client, build tool: its docs, source, or generated output) before concluding "cache" or "environment"
 
 ### Phase 2: Pattern Analysis
 
@@ -150,6 +154,7 @@ You MUST complete each phase before proceeding to the next.
    - State clearly: "I think X is the root cause because Y"
    - Write it down
    - Be specific, not vague
+   - When the user has supplied data that contradicts your hypothesis, reconcile against it before proposing another hypothesis or asking for another trace
 
 2. **Test Minimally**
    - Make the SMALLEST possible change to test hypothesis

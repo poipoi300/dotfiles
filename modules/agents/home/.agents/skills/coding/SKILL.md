@@ -5,16 +5,43 @@ description: Coding standards, style, opinionated tech picks, and worked example
 
 # Coding
 
+## Stay proactive while coding
+
+While working, flag issues you spot even if not asked — file them as issues
+(`project-management` skill, or mention in the reply without a tracker) rather
+than fixing unasked, unless the change is simple (confirmed bugs in repos the
+user owns follow `AGENTS.md` "Fixing what you find broken"):
+- Edge cases, off-by-one errors, or logical inconsistencies in adjacent code.
+- Silent failures (returning `None` instead of raising, overly eager defaults).
+- Mismatched shapes/dtypes/index alignments, or data leakage risks (e.g. future
+  data leaking into training targets).
+- Hardcoded paths or magic numbers that should be config parameters.
+
+## Goal-driven execution
+
+Turn tasks into verifiable goals:
+- "Add validation" → write tests for invalid inputs, then make them pass.
+- "Fix the bug" → write a test that reproduces it, then make it pass.
+- "Refactor X" → tests pass before and after.
+
+For multi-step tasks, state a brief plan sized to the task with each step
+paired to its verification, then proceed without waiting for approval unless a
+choice is costly to redo (`AGENTS.md`). Strong success criteria let you loop
+independently; weak ones ("make it work") invite unnecessary clarification.
+
 ## Style
 - Functional and component-based; highly reactive where the platform supports it (Vue reactivity, Convex live queries, React state derived not duplicated).
 - Modular, DRY, compact, guard clauses first — handle edge cases early and exit. Prefer broad, general solutions, but never at the cost of design, performance, or flexibility.
 - Abstract only when there is churn, or when one logical change would otherwise require edits in multiple files. Premature abstraction is a defect.
+- Check what already exists in the codebase for reuse before writing from scratch.
+- For refactors or bug fixes, updating related callers or siblings that the change itself would otherwise leave broken or inconsistent is in scope — state that scope in the intent and verify it (unrelated cleanup stays out of scope).
+- When a fix would force many call sites to remember something new (threading a parameter everywhere, a new convention), flag that fragility before proposing it and check whether a single boundary-level change removes the need.
 
 ## Standards
 - **Types:** Python 3.12+ style; exhaustive but non-restrictive hints (`Iterable` over `list`/`Sequence` for parameters).
 - **Docs:** Google-style docstrings for "what". Inline comments only for non-obvious "why" or constraints. Match the surrounding codebase's comment conventions. Prefer self-documenting names over comments. Never reference the current query/session in comments.
 - **Quoting:** double quotes for multi-character strings, single quotes for single characters, where language idioms allow; language syntax always wins.
-- **Delivery:** pitch alternative/superior approaches *before* the final code, then present one best implementation.
+- **Delivery:** note alternative/superior approaches and tradeoffs concisely before (or alongside) implementing, then proceed with one best implementation unless the choice is costly to redo (`AGENTS.md`).
 - **Libraries:** standard library by default; adopt a specialized library when it has genuinely solved the hard problems (see Opinionated Tech Picks). Cross-platform rules and stack choice are the project-setup skill.
 
 ## Opinionated Tech Picks

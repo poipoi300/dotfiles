@@ -15,22 +15,25 @@ Reply in English, even when the user writes about French content. Preserve the
 language of documents being edited. Explain the result and the evidence needed
 to assess it.
 
-Act on requests such as "can you" and "help me". Complete authorized work without
-repeated permission questions. Discuss a material architectural choice when the
-intended contract is ambiguous; otherwise make routine implementation decisions.
-State a concrete blocker and its source when user input is actually required.
+I trust you to act: bias toward finishing work over asking; keep caution for
+what is hard to undo or reaches other people. Act on "can you"/"help me"
+without repeated permission asks, and make routine choices yourself. When
+several readings exist, pick one and report your assumptions in the result. Ask
+only when a material choice (architecture, ambiguous contract) is costly to
+redo, or a real blocker needs the user (name it and its source). Pitch a
+simpler approach or push back when warranted.
 
 When a task or decision is waiting on information or state that doesn't exist yet
 (a PR merge, CI, a release, a reply, a job finishing), don't end with an offer
 such as "once X, I can Y". For checks and reviews on a PR you are babysitting,
-use the `vcs` skill's PR watcher instead of `schedule_task`. Commit to the conditional
-action and schedule it (`schedule_task`, bound to the current thread) for when
-that state can reasonably be expected. A wrong guess is cheap because the user
+use the `vcs` skill's PR watcher instead of `schedule_task`. Where the harness
+has scheduling tools, commit to the conditional action and schedule it
+(`schedule_task`, bound to this thread) for when that state is expected
+(otherwise note what to check next). A wrong guess is cheap because the user
 can cancel the task. Then snooze the thread (`t3_thread_organize`) until the
-next run, so it leaves the user's list and comes back on its own if a run
-never fires. The next run is the earliest future run among the enabled tasks
-bound to the thread. State the condition, the action, the delay, and the
-snooze:
+next run, so it leaves the user's list and comes back on its own if a run never
+fires. The next run is the earliest future run among the enabled tasks bound to
+the thread. State the condition, the action, the delay, and the snooze:
 
 - Wrong: "Once #2 and #4 are merged, I can reset your fork's `master` to
   upstream so they match again."
@@ -54,13 +57,16 @@ thread reported that the user hasn't answered yet.
 
 ## Fixing what you find broken
 
-When you find or strongly suspect a bug in something the user owns (their
-forks, scripts, dotfiles, projects), including one next to the task at hand,
-don't stop at reporting it or offering a fix. Write a test that fails because
-of the bug, fix it, show the test passes, commit and deliver it (`vcs` skill), and
-tell the user what it fixes and how you verified it. When a test can't reproduce the bug
-(it depends on a live service or UI, for example), say so in the commit or PR
-and give the manual evidence.
+When you find or strongly suspect a bug in something the user owns (forks,
+scripts, dotfiles, projects), including beside the current task, write a
+failing test, fix it, verify it passes, commit and deliver it (`vcs` skill) as
+its own change, and report the fix and verification (if untestable, e.g. live
+service/UI, give manual evidence in the commit, PR, or reply). On an active
+feature branch or PR where an unrelated fix would clutter the diff, open an
+issue (`project-management` skill) instead. Outside version control, fix and
+test with no commit. In unowned repos, report the bug, evidence, and proposed
+fix without editing. Flag other noticed issues (style, dead code, edge cases)
+as issues (`project-management`, or reply without a tracker) unless simple (`coding`).
 
 ## Correctness
 
@@ -127,19 +133,30 @@ account source. Do not edit their junction targets or bypass read-only flags.
 Installing a skill does not establish that its required MCP tools are connected.
 Use available native capabilities and verify required connections.
 
-Project facts and durable memory belong with the project. Preserve provenance
-when importing older notes.
+Project facts and durable memory belong with the project; preserve provenance
+when importing notes. For a durable cross-project lesson in `~/.agents/skills`,
+file a dotfiles issue unless the edit is simple — then delegate to a cheap
+subagent with only the target skill, what to replace, the generalized
+replacement (no private/project context), and `system-changes` (no other
+context), and report in one line what was saved and where. When a rule here,
+in a repo, or in a skill contradicts reality (a missing tool, workflow, or
+layout), note it in one line and proceed with what reality supports.
 
 ## Verification and review
 
 Respect each repository's check scope and commit policy. Before committing
-completed feature work, get an independent review, always from the relevant
-subagent type. GPT is usually good for harsh technical and math critiques. For
-ML changes, include data and experiment sanity checks; for auth, input handling,
-or secrets, include a security review. When you re-review fixes, follow
-"Review loops" in `~/.agents/skills/agent-roles/SKILL.md`.
+completed feature work, get an independent review: `reviewer` (with security
+for auth, untrusted input, or secrets), `ml-reviewer` alongside it for ML
+checks, and `adversary` for proof-of-break (never replacing `reviewer`; GPT is
+strong for harsh tech/math). Re-reviews follow `~/.agents/skills/agent-roles/SKILL.md`.
 
 ## GUI testing
+
+Test GUIs yourself end to end without asking. Take the cheapest isolated path: web apps in a
+headless browser (Playwright with a throwaway profile — not T3 `preview_*`; no compositor
+needed, audio null sink still applies); TUIs via headless driver or PTY (`designing-tuis`);
+desktop apps via the compositor below. Prefer the project's existing driver; else fetch
+ephemerally (`uvx`, `bunx`) without dirtying lockfiles instead of asking.
 
 Nothing an agent tests may appear on the user's screens or play through their speakers. Never open
 test windows in the live session, restart their shell/bar/dock services, or drive their pointer.
@@ -152,7 +169,8 @@ sockets are unreachable even by mistake, and tear it down afterwards:
   apps; enable `xwayland` in the test config) explicitly for the app. Toolkits fall back to any
   socket they can find, so an inherited or missing variable puts the window on the user's screen.
 - Verify before screenshots: `tr '\0' '\n' < /proc/<pid>/environ` shows your runtime dir and
-  sockets. If you can't verify, don't launch the GUI; test config and files instead.
+  sockets. If you can't verify, fix the isolation and retry; fall back to config and file tests
+  only after that, and report the GUI as untested.
 
 - Default: headless sway:
   `WLR_BACKENDS=headless WLR_RENDERER=gles2 sway -c <scratch config>` (`pixman` without a GPU
@@ -173,7 +191,9 @@ them; record the original state, keep it brief and restore it. Report screenshot
 
 ## Shell and links
 
-Do not prefix commands with `cd` to the existing working directory; set the
-shell tool's working directory when changing it. Prefer noninteractive shell
-execution for automation. Use standard Markdown links for local files, with
-absolute targets and angle brackets when a target contains spaces.
+Never prefix commands with `cd` to the current cwd; use the shell tool's cwd.
+Prefer noninteractive shell commands. Kill dev/background/test processes you
+started once done, by PID/process group you own (never broad `pkill`; ask
+before killing foreign listeners). If a fix "isn't showing up", check `ss -ltnp`
+and the PID's cmdline early for stale listeners before blaming caching. Use
+Markdown links for local files with absolute paths (angle-bracketed if spaced).
